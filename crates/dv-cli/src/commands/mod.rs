@@ -1,8 +1,10 @@
 pub mod add;
 pub mod doctor;
 pub mod export;
+pub mod gc;
 pub mod init;
 pub mod list;
+pub mod reindex;
 pub mod show;
 pub mod sync;
 pub mod verify;
@@ -89,6 +91,8 @@ pub async fn write_video_meta(vault: &Arc<Vault>, meta: &VideoMeta) -> Result<()
 }
 
 /// 把某个分 P 的弹幕落成文件（XML 始终写，JSONL 按配置）。
+///
+/// 同步完成和 `gc` 之后都要调它，保证磁盘文件始终是库的忠实投影。
 pub fn write_page_artifacts(
     vault: &Vault,
     cid: Cid,

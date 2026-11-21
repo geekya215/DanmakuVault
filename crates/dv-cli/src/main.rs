@@ -37,6 +37,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Show(args) => commands::show::run(&ctx, args).await,
         Command::Export(args) => commands::export::run(&ctx, args).await,
         Command::Verify(args) => commands::verify::run(&ctx, args).await,
+        Command::Gc(args) => commands::gc::run(&ctx, args).await,
+        Command::Reindex => commands::reindex::run(&ctx).await,
         Command::Doctor => commands::doctor::run(&ctx),
     }
 }

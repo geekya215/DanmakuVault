@@ -44,6 +44,15 @@ pub struct PageStats {
     pub segments: u32,
 }
 
+/// `gc` 的结果：删了多少行、影响了哪些分 P。
+///
+/// 受影响的分 P 必须重新落文件，否则 `verify` 会立刻报「文件与库不一致」。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PurgeOutcome {
+    pub deleted: u64,
+    pub affected: Vec<Cid>,
+}
+
 pub trait Repository {
     /// 写入/更新稿件与分 P 元信息。
     fn upsert_video(&self, meta: &VideoMeta) -> Result<()>;
@@ -57,6 +66,15 @@ pub trait Repository {
 
     /// 把本轮全量同步中没再出现的弹幕标为墓碑，返回受影响行数。
     fn mark_missing(&self, cid: Cid, before: i64) -> Result<u64>;
+
+    /// 墓碑时间早于 `before` 的条数（`gc` 的预演）。
+    fn count_missing_before(&self, before: i64) -> Result<u64>;
+
+    /// 物理删除墓碑时间早于 `before` 的弹幕。
+    fn purge_missing_before(&self, before: i64) -> Result<PurgeOutcome>;
+
+    /// 分 P 在磁盘上的位置：`(目录名, 分P 序号)`。
+    fn page_location(&self, cid: Cid) -> Result<Option<(String, u32)>>;
 
     /// 读取某分 P 的弹幕，按时间排序。
     ///

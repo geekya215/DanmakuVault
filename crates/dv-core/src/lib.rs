@@ -15,7 +15,7 @@ pub use id::{Aid, Bvid, Cid, Dmid, VideoRef};
 pub use model::{
     Danmaku, Owner, PageMeta, Segment, SegmentReq, SegmentSource, SegmentState, VideoMeta,
 };
-pub use repo::{PageStats, Repository, UpsertStats, VideoSummary};
+pub use repo::{PageStats, PurgeOutcome, Repository, UpsertStats, VideoSummary};
 pub use source::DanmakuSource;
 
 use std::time::{SystemTime, UNIX_EPOCH};

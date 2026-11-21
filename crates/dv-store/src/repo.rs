@@ -5,8 +5,8 @@
 use rusqlite::{params, OptionalExtension};
 
 use dv_core::{
-    now_unix, Aid, Bvid, Cid, Danmaku, Dmid, Owner, PageMeta, PageStats, Repository, Result,
-    SegmentSource, SegmentState, UpsertStats, VaultError, VideoMeta, VideoSummary,
+    now_unix, Aid, Bvid, Cid, Danmaku, Dmid, Owner, PageMeta, PageStats, PurgeOutcome, Repository,
+    Result, SegmentSource, SegmentState, UpsertStats, VaultError, VideoMeta, VideoSummary,
 };
 
 use crate::migrations::db_err;
@@ -217,6 +217,75 @@ impl Repository for Vault {
                 )
                 .map_err(db_err)?;
             Ok(changed as u64)
+        })
+    }
+
+    fn count_missing_before(&self, before: i64) -> Result<u64> {
+        self.with_conn(|conn| {
+            let count = conn
+                .query_row(
+                    "SELECT count(*) FROM danmaku WHERE missing_since IS NOT NULL AND missing_since < ?1",
+                    params![before],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(db_err)?;
+            Ok(count.max(0) as u64)
+        })
+    }
+
+    fn purge_missing_before(&self, before: i64) -> Result<PurgeOutcome> {
+        self.with_conn(|conn| {
+            let tx = conn.unchecked_transaction().map_err(db_err)?;
+
+            let affected: Vec<Cid> = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT DISTINCT cid FROM danmaku
+                         WHERE missing_since IS NOT NULL AND missing_since < ?1",
+                    )
+                    .map_err(db_err)?;
+                let rows = stmt
+                    .query_map(params![before], |row| row.get::<_, i64>(0))
+                    .map_err(db_err)?;
+                let mut out = Vec::new();
+                for row in rows {
+                    out.push(Cid(row.map_err(db_err)? as u64));
+                }
+                out
+            };
+
+            let deleted = tx
+                .execute(
+                    "DELETE FROM danmaku WHERE missing_since IS NOT NULL AND missing_since < ?1",
+                    params![before],
+                )
+                .map_err(db_err)?;
+
+            tx.commit().map_err(db_err)?;
+            Ok(PurgeOutcome {
+                deleted: deleted as u64,
+                affected,
+            })
+        })
+    }
+
+    fn page_location(&self, cid: Cid) -> Result<Option<(String, u32)>> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT v.bvid, v.aid, p.page
+                 FROM page p JOIN video v ON v.aid = p.aid
+                 WHERE p.cid = ?1",
+                params![cid.get() as i64],
+                |row| {
+                    let bvid: Option<String> = row.get(0)?;
+                    let aid: i64 = row.get(1)?;
+                    let page: i64 = row.get(2)?;
+                    let folder = bvid.unwrap_or_else(|| format!("av{aid}"));
+                    Ok((folder, page as u32))
+                },
+            )
+            .optional()
+            .map_err(db_err)
         })
     }
 
@@ -580,6 +649,32 @@ mod tests {
         assert_eq!(list[0].danmaku_count, 2);
         assert_eq!(list[0].page_count, 1);
         assert!(list[0].bvid.is_some());
+    }
+
+    #[test]
+    fn purge_reports_affected_pages() {
+        let vault = Vault::open_in_memory().unwrap();
+        vault.upsert_video(&sample_meta()).unwrap();
+        vault
+            .upsert_danmaku(Cid(11), &[sample_danmaku(1, 0)], 1_000)
+            .unwrap();
+
+        // 还没打墓碑时没有候选
+        assert_eq!(vault.count_missing_before(2_001).unwrap(), 0);
+
+        vault.mark_missing(Cid(11), 2_000).unwrap();
+        assert_eq!(vault.count_missing_before(2_001).unwrap(), 1);
+
+        let outcome = vault.purge_missing_before(2_001).unwrap();
+        assert_eq!(outcome.deleted, 1);
+        assert_eq!(outcome.affected, vec![Cid(11)]);
+        assert!(vault.load_danmaku(Cid(11), true).unwrap().is_empty());
+
+        // gc 之后要靠它把文件重画回去
+        assert_eq!(
+            vault.page_location(Cid(11)).unwrap(),
+            Some(("BV1GJ411x7h7".to_string(), 1))
+        );
     }
 
     #[test]

@@ -56,6 +56,12 @@ pub enum Command {
     /// 校验备份完整性与文件一致性
     Verify(VerifyArgs),
 
+    /// 清理长期处于「已消失」状态的弹幕
+    Gc(GcArgs),
+
+    /// 从 videos/ 下的文件重建索引
+    Reindex,
+
     /// 环境自检：库、目录、配置、cookie
     Doctor,
 }
@@ -132,4 +138,19 @@ pub struct VerifyArgs {
     /// 逐段重新拉取并比对 sha256（需要联网）
     #[arg(long)]
     pub deep: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct GcArgs {
+    /// 只删除标记为消失超过 N 天的弹幕
+    #[arg(long, default_value_t = 30, value_name = "DAYS")]
+    pub older_than_days: u32,
+
+    /// 只统计，不删除
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// 确认执行删除（不可逆）
+    #[arg(long)]
+    pub yes: bool,
 }
