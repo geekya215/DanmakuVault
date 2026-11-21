@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = ["crates/dv-core", "crates/dv-store", "crates/dv-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/geekya215/DanmakuVault"
+
+[workspace.dependencies]
+dv-core = { path = "crates/dv-core" }
+dv-store = { path = "crates/dv-store" }
+
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+directories = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "macros"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "time",
+    "sync",
+    "fs",
+] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 本机 MSVC 14.44 编 C 源码时带 /Z7 会失败（D8050: cannot execute c1.dll）。
+# 依赖里的 C 代码（sqlite3）不需要调试信息，只对依赖关掉。
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
