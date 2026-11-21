@@ -815,13 +815,24 @@ API 错误码映射表（`code → 语义 → 是否可重试`）集中在一个
 
 ## 13. 打包与 CI
 
-- `cargo-dist` 产 `x86_64-pc-windows-msvc` / `aarch64-apple-darwin` / `x86_64-unknown-linux-musl`。
-- GitHub Actions：
-  - `fmt` + `clippy -D warnings` + `test`（三平台矩阵）
-  - `cargo-deny`（许可/漏洞）、`cargo-audit`
-  - 发布时校验 musl 静态链接可跑
-- MSRV 写死在 `rust-toolchain.toml`，并在 CI 里跑一次 `cargo +1.85 check`。
-- 单二进制体积预期 8~12MB（`lto = "thin"`、`strip = true`、`panic = "abort"` 可选）。
+实际落地的是三个 workflow（`.github/workflows/`），没有引入 `cargo-dist`：
+
+| 文件 | 触发 | 内容 |
+|---|---|---|
+| `ci.yml` | push 到 master、PR、手动 | `fmt --check`；`clippy -D warnings`（all targets）；`test --workspace` 的三平台矩阵；`dv init && dv doctor` 冒烟；MSRV 1.88（`cargo check`，需 `override` 才能压过 `rust-toolchain.toml`） |
+| `release.yml` | 推 `v*` tag、手动 | 三个目标（linux-gnu / windows-msvc / macos-arm64）`cargo build --release --locked`，打包后附 `SHA256SUMS.txt` 发布到 GitHub Release |
+| `audit.yml` | 每周一、手动 | `rustsec/audit-check`，只在定时任务里跑，不阻塞 PR |
+
+另外 `dependabot.yml` 按周聚合 cargo 更新、按月更新 actions。
+
+几点说明：
+
+- **不用 `cargo-dist`**：它把构建逻辑藏进生成的工作流，改起来反而绕；直接写三段 matrix 更容易审计。
+  代价是要自己维护打包脚本（tar.gz / Compress-Archive）。
+- **没有 musl 静态目标**：Windows 是主要目标，Linux 用 gnu 目标已够；需要静态链接时再加。
+- **MSRV 是 1.88 而不是更早**：`time 0.3.x` 与 `icu_*` 都要求 1.88，压低只能靠降级依赖，不值当。
+  该值由 CI 的 `msrv` 任务持续验证，不是嘴上说说。
+- 单二进制体积预期 8~12MB（`lto = "thin"`、`strip = true`）。
 
 ---
 
@@ -890,7 +901,7 @@ API 错误码映射表（`code → 语义 → 是否可重试`）集中在一个
 | M4 批量目标 / `daemon` | ❌ 不做 | 收藏夹、UP 主、WBI 签名、定时任务全部移出范围 |
 | M5 `gc` / `reindex` | ✅ | `gc` 删除后会重绘受影响分 P 的文件 |
 | M5 `ass` / `srt` 导出 | ❌ 不做 | 不烧字幕，格式只保留 XML 与 JSONL |
-| M6 打包分发 | ⏳ 未做 | 目前只有 `cargo build --release` |
+| M6 打包分发 | 🟡 部分 | `release.yml` 能出三平台二进制；还没做安装脚本与包管理器 |
 
 ### 18.1 与上文设计的差异
 

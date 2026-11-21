@@ -1,5 +1,7 @@
 # DanmakuVault
 
+[![CI](https://github.com/geekya215/DanmakuVault/actions/workflows/ci.yml/badge.svg)](https://github.com/geekya215/DanmakuVault/actions/workflows/ci.yml)
+
 把 B 站视频弹幕**完整、可校验、可增量**地备份到本地，并导出成播放器能直接加载的 XML。
 
 纯 CLI、单文件、跨平台。当前版本只做「单视频手动备份」——不爬收藏夹、不追 UP 主、不下载视频。
@@ -173,6 +175,10 @@ cargo clippy --workspace --all-targets
 cargo test --workspace
 ```
 
+- MSRV 是 **Rust 1.88**（`Cargo.toml` 的 `rust-version`，CI 里有专门任务验证）。
+- CI（[ci.yml](.github/workflows/ci.yml)）在 Ubuntu / Windows / macOS 上跑 fmt、clippy（`-D warnings`）、
+  全量测试，外加 `dv init && dv doctor` 冒烟；推 `v*` tag 会触发 [release.yml](.github/workflows/release.yml)
+  产出三个平台的二进制并附 `SHA256SUMS.txt`。
 - 需要 MSVC 工具链（`rusqlite` 的 bundled SQLite 要编译 C）。
 - Windows + MSVC 14.44 编 C 源码时带 `/Z7` 会失败（`D8050`），
   `Cargo.toml` 里已对**依赖**关掉 debuginfo（`[profile.dev.package."*"] debug = false`），

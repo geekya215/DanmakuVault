@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次运行，省额度
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+      # 端到端冒烟：真建一个 vault 再自检，验证 schema、目录与写入都是通的
+      - name: smoke (init + doctor)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --quiet --bin dv -- init --root "$RUNNER_TEMP/vault" --config "$RUNNER_TEMP/dv.toml"
+          cargo run --quiet --bin dv -- doctor --vault "$RUNNER_TEMP/vault"
+
+  msrv:
+    name: msrv 1.88
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 仓库里有 rust-toolchain.toml（channel = stable），不加 override 的话
+      # 这里装的 1.88 会被文件里的 stable 顶掉，MSRV 校验就成了摆设。
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          override: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-1.88
+      - run: cargo check --workspace --all-targets

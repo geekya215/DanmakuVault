@@ -5,7 +5,7 @@ members = ["crates/dv-core", "crates/dv-store", "crates/dv-bili", "crates/dv-exp
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/geekya215/DanmakuVault"
 
