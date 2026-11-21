@@ -1,0 +1,13 @@
+[package]
+name = "dv-export"
+description = "Render DanmakuVault danmaku to bilibili XML / JSONL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dv-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

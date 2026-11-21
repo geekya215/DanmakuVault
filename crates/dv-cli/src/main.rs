@@ -35,6 +35,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Sync(args) => commands::sync::run(&ctx, args).await,
         Command::List => commands::list::run(&ctx).await,
         Command::Show(args) => commands::show::run(&ctx, args).await,
+        Command::Export(args) => commands::export::run(&ctx, args).await,
         Command::Doctor => commands::doctor::run(&ctx),
     }
 }

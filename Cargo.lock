@@ -358,6 +358,7 @@ dependencies = [
  "directories",
  "dv-bili",
  "dv-core",
+ "dv-export",
  "dv-store",
  "serde",
  "serde_json",
@@ -376,6 +377,15 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "dv-export"
+version = "0.1.0"
+dependencies = [
+ "dv-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

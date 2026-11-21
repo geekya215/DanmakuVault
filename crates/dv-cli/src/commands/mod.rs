@@ -1,5 +1,6 @@
 pub mod add;
 pub mod doctor;
+pub mod export;
 pub mod init;
 pub mod list;
 pub mod show;
@@ -9,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dv_bili::{BiliClient, BiliConfig};
-use dv_core::VaultError;
+use dv_core::{Cid, Repository, VaultError, VideoMeta};
 use dv_store::Vault;
 
 use crate::config;
@@ -71,4 +72,38 @@ where
         .await
         .map_err(|err| anyhow::anyhow!("后台任务异常: {err}"))?
         .map_err(Into::into)
+}
+
+/// 写 `videos/<id>/meta.json`：脱离数据库也能读懂这份备份。
+pub async fn write_video_meta(vault: &Arc<Vault>, meta: &VideoMeta) -> Result<()> {
+    let worker = vault.clone();
+    let folder = meta.folder_name();
+    let snapshot = meta.clone();
+    blocking(move || {
+        let dir = worker.paths().video_dir(&folder);
+        dv_store::write_json_atomic(&dir.join("meta.json"), &snapshot)?;
+        Ok(())
+    })
+    .await
+}
+
+/// 把某个分 P 的弹幕落成文件（XML 始终写，JSONL 按配置）。
+pub fn write_page_artifacts(
+    vault: &Vault,
+    cid: Cid,
+    folder: &str,
+    page: u32,
+    write_jsonl: bool,
+) -> dv_core::Result<()> {
+    let items = vault.load_danmaku(cid, true)?;
+    let dir = vault.paths().page_dir(folder, page);
+
+    let xml = dv_export::xml::render(cid.get(), &items);
+    dv_store::write_atomic(&dir.join("danmaku.xml"), xml.as_bytes())?;
+
+    if write_jsonl {
+        let jsonl = dv_export::jsonl::render(&items);
+        dv_store::write_atomic(&dir.join("danmaku.jsonl"), jsonl.as_bytes())?;
+    }
+    Ok(())
 }

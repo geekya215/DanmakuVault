@@ -50,6 +50,9 @@ pub enum Command {
     /// 查看单个视频的同步状态
     Show(ShowArgs),
 
+    /// 导出弹幕（XML / JSONL）
+    Export(ExportArgs),
+
     /// 环境自检：库、目录、配置、cookie
     Doctor,
 }
@@ -92,4 +95,27 @@ pub struct ShowArgs {
     /// BV 号 / av 号 / URL
     #[arg(value_name = "ID")]
     pub id: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ExportArgs {
+    /// BV 号 / av 号 / URL
+    #[arg(value_name = "ID")]
+    pub id: String,
+
+    /// 只导出指定分P；`all` 表示全部
+    #[arg(long, default_value = "all", value_name = "N|all")]
+    pub page: String,
+
+    /// 输出格式
+    #[arg(long, default_value = "xml", value_parser = ["xml", "jsonl"])]
+    pub format: String,
+
+    /// 输出目录（默认写回 vault 内的 videos/）
+    #[arg(long, value_name = "DIR")]
+    pub out: Option<PathBuf>,
+
+    /// 排除已标记为消失（服务端已删除）的弹幕
+    #[arg(long)]
+    pub exclude_missing: bool,
 }

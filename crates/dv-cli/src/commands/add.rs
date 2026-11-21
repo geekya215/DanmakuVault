@@ -5,7 +5,7 @@ use dv_core::{DanmakuSource, Repository, VideoRef};
 use serde::Serialize;
 
 use crate::cli::AddArgs;
-use crate::commands::{blocking, build_client, open_vault, print_json};
+use crate::commands::{blocking, build_client, open_vault, print_json, write_video_meta};
 use crate::config::Context;
 
 #[derive(Serialize)]
@@ -28,6 +28,7 @@ pub async fn run(ctx: &Context, args: &AddArgs) -> Result<()> {
         let worker = vault.clone();
         let to_store = meta.clone();
         blocking(move || worker.upsert_video(&to_store)).await?;
+        write_video_meta(&vault, &meta).await?;
 
         if !ctx.json {
             println!(

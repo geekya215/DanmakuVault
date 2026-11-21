@@ -21,7 +21,9 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::cli::SyncArgs;
-use crate::commands::{blocking, build_client, open_vault, print_json};
+use crate::commands::{
+    blocking, build_client, open_vault, print_json, write_page_artifacts, write_video_meta,
+};
 use crate::config::{Config, Context};
 
 #[derive(Debug, Default, Serialize)]
@@ -161,6 +163,8 @@ async fn sync_video(
     let run_start = now_unix();
     let mut failed_pages: Vec<u32> = Vec::new();
 
+    write_video_meta(vault, meta).await?;
+
     for page in &meta.pages {
         let worker = vault.clone();
         let cid = page.cid;
@@ -280,6 +284,9 @@ async fn sync_page(
 
     let worker = vault.clone();
     let cid = page.cid;
+    let folder = meta.folder_name();
+    let page_no = page.page;
+    let write_jsonl = cfg.export.write_jsonl;
     let marked = blocking(move || {
         // 只有「每段都是本轮新抓的」才能判定哪些弹幕消失了。
         let marked = if had_cached {
@@ -288,6 +295,7 @@ async fn sync_page(
             worker.mark_missing(cid, run_start)?
         };
         worker.set_page_synced(cid, run_start)?;
+        write_page_artifacts(&worker, cid, &folder, page_no, write_jsonl)?;
         Ok(marked)
     })
     .await?;
