@@ -12,6 +12,7 @@ name = "dv"
 path = "src/main.rs"
 
 [dependencies]
+dv-bili.workspace = true
 dv-core.workspace = true
 dv-store.workspace = true
 anyhow.workspace = true

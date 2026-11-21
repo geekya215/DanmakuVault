@@ -31,6 +31,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let ctx = config::Context::load(&cli)?;
     match &cli.command {
         Command::Init(args) => commands::init::run(&ctx, args),
+        Command::Add(args) => commands::add::run(&ctx, args).await,
+        Command::Sync(args) => commands::sync::run(&ctx, args).await,
+        Command::List => commands::list::run(&ctx).await,
+        Command::Show(args) => commands::show::run(&ctx, args).await,
         Command::Doctor => commands::doctor::run(&ctx),
     }
 }

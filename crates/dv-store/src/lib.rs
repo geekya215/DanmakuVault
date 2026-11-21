@@ -2,6 +2,7 @@
 
 pub mod fsx;
 pub mod migrations;
+pub mod repo;
 pub mod vault;
 
 pub use fsx::{write_atomic, write_json_atomic};

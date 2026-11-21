@@ -38,6 +38,18 @@ pub enum Command {
     /// 初始化 vault：建目录、建库、写默认配置
     Init(InitArgs),
 
+    /// 登记视频：解析元信息与分 P 并落库（不抓弹幕）
+    Add(AddArgs),
+
+    /// 抓取弹幕；省略 ID 时同步库里全部已登记视频
+    Sync(SyncArgs),
+
+    /// 列出已备份的视频
+    List,
+
+    /// 查看单个视频的同步状态
+    Show(ShowArgs),
+
     /// 环境自检：库、目录、配置、cookie
     Doctor,
 }
@@ -51,4 +63,33 @@ pub struct InitArgs {
     /// 覆盖已存在的配置文件
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct AddArgs {
+    /// BV 号 / av 号 / 视频页 URL，可给多个
+    #[arg(required = true, value_name = "ID")]
+    pub ids: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct SyncArgs {
+    /// 只同步这些视频（BV 号 / av 号 / URL）
+    #[arg(value_name = "ID")]
+    pub ids: Vec<String>,
+
+    /// 忽略新鲜度检查，强制重新抓取全部分段
+    #[arg(long)]
+    pub force: bool,
+
+    /// 只打印计划，不发请求
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ShowArgs {
+    /// BV 号 / av 号 / URL
+    #[arg(value_name = "ID")]
+    pub id: String,
 }
