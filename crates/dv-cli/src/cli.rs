@@ -53,6 +53,9 @@ pub enum Command {
     /// 导出弹幕（XML / JSONL）
     Export(ExportArgs),
 
+    /// 校验备份完整性与文件一致性
+    Verify(VerifyArgs),
+
     /// 环境自检：库、目录、配置、cookie
     Doctor,
 }
@@ -118,4 +121,15 @@ pub struct ExportArgs {
     /// 排除已标记为消失（服务端已删除）的弹幕
     #[arg(long)]
     pub exclude_missing: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct VerifyArgs {
+    /// 只校验这个视频（BV 号 / av 号 / URL）
+    #[arg(value_name = "ID")]
+    pub id: Option<String>,
+
+    /// 逐段重新拉取并比对 sha256（需要联网）
+    #[arg(long)]
+    pub deep: bool,
 }

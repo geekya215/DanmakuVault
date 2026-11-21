@@ -22,11 +22,11 @@ use tracing::info;
 
 use crate::cli::SyncArgs;
 use crate::commands::{
-    blocking, build_client, open_vault, print_json, write_page_artifacts, write_video_meta,
+    blocking, build_client, open_vault, print_json, ts_unix, write_page_artifacts, write_video_meta,
 };
 use crate::config::{Config, Context};
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Clone)]
 struct Totals {
     videos: u32,
     videos_failed: u32,
@@ -39,6 +39,26 @@ struct Totals {
     danmaku_added: u64,
     danmaku_seen: u64,
     marked_missing: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct VideoOutcome {
+    id: String,
+    title: String,
+    ok: bool,
+    danmaku_added: u64,
+    error: Option<String>,
+}
+
+/// 每次 sync 都会落一份机器可读报告，便于事后回溯「那次同步到底做了什么」。
+#[derive(Debug, Serialize)]
+struct RunReport {
+    app: &'static str,
+    vault: String,
+    started_at: String,
+    finished_at: String,
+    totals: Totals,
+    videos: Vec<VideoOutcome>,
 }
 
 pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
@@ -71,23 +91,53 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
         return Ok(());
     }
 
+    let started_at = now_unix();
     let mut totals = Totals::default();
+    let mut outcomes: Vec<VideoOutcome> = Vec::with_capacity(targets.len());
 
     for meta in &targets {
-        match sync_video(&vault, &client, meta, args.force, &ctx.config, &mut totals).await {
+        let added_before = totals.danmaku_added;
+        let result = sync_video(&vault, &client, meta, args.force, &ctx.config, &mut totals).await;
+        let added = totals.danmaku_added - added_before;
+
+        match result {
             Ok(()) => {
                 totals.videos += 1;
                 println!("✓ {:<14} 《{}》", meta.folder_name(), meta.title);
+                outcomes.push(VideoOutcome {
+                    id: meta.folder_name(),
+                    title: meta.title.clone(),
+                    ok: true,
+                    danmaku_added: added,
+                    error: None,
+                });
             }
             Err(err) => {
                 totals.videos_failed += 1;
                 eprintln!("✗ {:<14} 《{}》: {err}", meta.folder_name(), meta.title);
+                outcomes.push(VideoOutcome {
+                    id: meta.folder_name(),
+                    title: meta.title.clone(),
+                    ok: false,
+                    danmaku_added: added,
+                    error: Some(err.to_string()),
+                });
             }
         }
     }
 
+    let report = RunReport {
+        app: env!("CARGO_PKG_VERSION"),
+        vault: ctx.vault_root.display().to_string(),
+        started_at: ts_unix(started_at),
+        finished_at: ts_unix(now_unix()),
+        totals: totals.clone(),
+        videos: outcomes,
+    };
+    let report_path = write_report(&vault, &report).await?;
+
     if ctx.json {
-        print_json(&totals)?;
+        print_json(&report)?;
     } else {
         println!(
             "\n视频 {}（失败 {}） · 分P {}（跳过 {} 失败 {}） · 分段 {}{}",
@@ -113,6 +163,7 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
             "弹幕 新增 {} · 覆盖 {} · 标记消失 {}",
             totals.danmaku_added, totals.danmaku_seen, totals.marked_missing
         );
+        println!("报告 {}", report_path.display());
     }
 
     if totals.videos_failed > 0 || totals.pages_failed > 0 {
@@ -302,4 +353,26 @@ async fn sync_page(
 
     totals.marked_missing += marked;
     Ok(())
+}
+
+/// 写本次运行的报告文件，返回路径。
+async fn write_report(vault: &Arc<Vault>, report: &RunReport) -> Result<std::path::PathBuf> {
+    let path = vault
+        .paths()
+        .reports_dir()
+        .join(format!("{}.json", report_stamp()));
+    let mut body = serde_json::to_vec_pretty(report)?;
+    body.push(b'\n');
+    dv_store::write_atomic(&path, &body)?;
+    Ok(path)
+}
+
+/// 文件名精确到毫秒：同一秒内连跑两次也不会互相覆盖。
+fn report_stamp() -> String {
+    let format = time::macros::format_description!(
+        "[year][month][day]T[hour][minute][second][subsecond digits:3]Z"
+    );
+    time::OffsetDateTime::now_utc()
+        .format(format)
+        .unwrap_or_else(|_| "unknown".to_string())
 }

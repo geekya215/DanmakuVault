@@ -5,6 +5,7 @@ pub mod init;
 pub mod list;
 pub mod show;
 pub mod sync;
+pub mod verify;
 
 use std::sync::Arc;
 
