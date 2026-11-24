@@ -50,7 +50,7 @@ jobs:
           Compress-Archive -Path "target/${{ matrix.target }}/release/dv.exe" -DestinationPath "$name.zip"
           Get-ChildItem "$name.zip" | Select-Object Name, Length
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dv-${{ matrix.target }}
           path: |
