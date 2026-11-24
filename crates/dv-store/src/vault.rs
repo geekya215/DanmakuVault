@@ -1,7 +1,8 @@
-//! vault 目录布局与 SQLite 连接。
+//! Vault directory layout and the SQLite connection.
 //!
-//! 写入模型：一把 `Mutex<Connection>` 把所有写操作串行化，等价于「单写者」，
-//! 但不需要额外的任务/通道。读操作很少（导出、list），共用同一连接即可。
+//! Write model: one `Mutex<Connection>` serializes every write, which is equivalent
+//! to a "single writer" but needs no extra tasks/channels. Reads are rare (export,
+//! list), so they can share that same connection.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -14,7 +15,7 @@ use dv_core::{now_unix, Result, VaultError};
 use crate::fsx;
 use crate::migrations::{db_err, migrate, schema_version, SCHEMA_VERSION};
 
-/// vault 内的固定路径。所有拼接都走这里，避免各处硬编码。
+/// Fixed paths inside a vault. Every path is assembled here so nothing hard-codes them elsewhere.
 #[derive(Clone, Debug)]
 pub struct VaultPaths {
     root: PathBuf,
@@ -78,7 +79,7 @@ impl VaultPaths {
     }
 }
 
-/// `vault.json`：脱离 DB 也能认出这是谁的库、什么版本。
+/// `vault.json`: identifies whose database this is and which version, even without the DB.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VaultMarker {
     pub schema_version: i32,
@@ -86,7 +87,7 @@ pub struct VaultMarker {
     pub created_at: i64,
 }
 
-/// 库规模摘要，`init` / `doctor` 用。
+/// Database size summary, used by `init` / `doctor`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VaultStats {
     pub videos: u64,
@@ -102,7 +103,7 @@ pub struct Vault {
 }
 
 impl Vault {
-    /// 创建（或补全）一个 vault：建目录、建库、跑迁移、写 marker。
+    /// Create (or complete) a vault: make the directories, create the DB, run migrations, write the marker.
     pub fn create(root: impl Into<PathBuf>) -> Result<Self> {
         let paths = VaultPaths::new(root);
         paths.ensure_layout()?;
@@ -111,13 +112,13 @@ impl Vault {
         Ok(vault)
     }
 
-    /// 打开已有 vault（不主动建目录）。
+    /// Open an existing vault (does not create directories).
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let paths = VaultPaths::new(root);
         Self::open_paths(paths, true)
     }
 
-    /// 内存库，仅测试用。
+    /// In-memory database, for tests only.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(db_err)?;
         let mut conn = conn;
@@ -132,7 +133,7 @@ impl Vault {
     fn open_paths(paths: VaultPaths, must_exist: bool) -> Result<Self> {
         if must_exist && !paths.root().exists() {
             return Err(VaultError::Other(format!(
-                "vault 不存在: {}",
+                "vault does not exist: {}",
                 paths.root().display()
             )));
         }
@@ -155,7 +156,7 @@ impl Vault {
         schema_version(&conn)
     }
 
-    /// 给调用方一段独占的只读/写访问。写入请保持短事务。
+    /// Hand the caller exclusive read/write access. Keep write transactions short.
     pub fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let conn = self.lock();
         f(&conn)
@@ -197,7 +198,7 @@ impl Vault {
     }
 
     fn lock(&self) -> MutexGuard<'_, Connection> {
-        // 一个 panic 的写事务不该让整个库不可用：恢复被毒化的锁。
+        // A panicked write transaction must not make the whole database unusable: recover the poisoned lock.
         self.conn
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -205,7 +206,7 @@ impl Vault {
 }
 
 fn configure(conn: &Connection) -> Result<()> {
-    // journal_mode 会返回一行结果，必须用 query_row 而不是 pragma_update。
+    // journal_mode returns a result row, so this must use query_row rather than pragma_update.
     conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))
         .map_err(db_err)?;
     conn.execute_batch(
@@ -239,7 +240,7 @@ mod tests {
         assert_eq!(stats, VaultStats::default());
 
         drop(vault);
-        // 重复 init 应当幂等
+        // Repeating init should be idempotent
         let again = Vault::create(&root).unwrap();
         assert_eq!(again.schema_version().unwrap(), SCHEMA_VERSION);
 

@@ -75,7 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          # nullglob：某个后缀没产出时不要报 "No such file"
+          # nullglob: do not fail when one of the suffixes produced nothing
           shopt -s nullglob
           sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt

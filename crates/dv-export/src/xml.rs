@@ -1,15 +1,15 @@
-//! B 站兼容的弹幕 XML。
+//! Bilibili-compatible danmaku XML.
 //!
 //! ```xml
 //! <i>
 //!   <chatserver>chat.bilibili.com</chatserver>
 //!   ...
-//!   <d p="29.35200,1,25,16777215,1565103107,0,f7a4e1a1,1565103107899,7">前方高能</d>
+//!   <d p="29.35200,1,25,16777215,1565103107,0,f7a4e1a1,1565103107899,7">high energy ahead</d>
 //! </i>
 //! ```
 //!
-//! `p` 现在的官方格式是 **9 段**（第 9 段是权重），与线上 `list.so` 一致；
-//! 老播放器按前 8 段解析，多出来的一段会被忽略。
+//! The current official `p` format has **9 segments** (the 9th is the weight), matching the
+//! online `list.so`; older players parse the first 8 segments and ignore the extra one.
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -18,7 +18,7 @@ use dv_core::Danmaku;
 
 use crate::sorted;
 
-/// 渲染整份弹幕 XML。
+/// Render a complete danmaku XML document.
 pub fn render(cid: u64, items: &[Danmaku]) -> String {
     let ordered = sorted(items);
     let mut out = String::with_capacity(ordered.len() * 96 + 256);
@@ -27,7 +27,7 @@ pub fn render(cid: u64, items: &[Danmaku]) -> String {
     out.push_str("  <chatserver>chat.bilibili.com</chatserver>\n");
     let _ = writeln!(out, "  <chatid>{cid}</chatid>");
     out.push_str("  <mission>0</mission>\n");
-    // 0 表示不限制，避免播放器再截断一次。
+    // 0 means unlimited, so players do not truncate the list a second time.
     out.push_str("  <maxlimit>0</maxlimit>\n");
     out.push_str("  <state>0</state>\n");
     out.push_str("  <real_name>0</real_name>\n");
@@ -45,7 +45,7 @@ pub fn render(cid: u64, items: &[Danmaku]) -> String {
     out
 }
 
-/// 构造 `<d p="...">` 里的 9 段属性。
+/// Build the 9-segment attribute inside `<d p="...">`.
 pub fn p_attr(d: &Danmaku) -> String {
     format!(
         "{},{},{},{},{},{},{},{},{}",
@@ -61,7 +61,8 @@ pub fn p_attr(d: &Danmaku) -> String {
     )
 }
 
-/// XML 文本转义。只转 5 个必须转的字符，不产出数字实体（部分老播放器不认）。
+/// Escape XML text. Only the 5 characters that must be escaped are replaced, and no numeric
+/// entities are produced (some older players do not recognize them).
 pub fn escape(text: &str) -> Cow<'_, str> {
     if !text.contains(['&', '<', '>', '"', '\'']) {
         return Cow::Borrowed(text);
@@ -81,7 +82,7 @@ pub fn escape(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// 反转义，供解析旧版 XML 时使用。
+/// Unescape text, used when parsing legacy XML.
 pub fn unescape(text: &str) -> String {
     if !text.contains('&') {
         return text.to_string();
@@ -107,7 +108,7 @@ pub fn unescape(text: &str) -> String {
             "&#39;" => out.push('\''),
             "&#10;" => out.push('\n'),
             other if other.starts_with("&#") => {
-                // 数字实体：不认识就原样保留，不要吞掉内容
+                // Numeric entity: keep it verbatim when unrecognized, do not swallow its content
                 let digits = &other[2..other.len().saturating_sub(1)];
                 match digits.parse::<u32>().ok().and_then(char::from_u32) {
                     Some(ch) => out.push(ch),
@@ -146,14 +147,14 @@ mod tests {
 
     #[test]
     fn renders_header_and_sorted_items() {
-        let items = vec![dm(2, 5_000, "后"), dm(1, 1_000, "前")];
+        let items = vec![dm(2, 5_000, "later"), dm(1, 1_000, "earlier")];
         let xml = render(137_649_199, &items);
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<i>\n"));
         assert!(xml.contains("<chatid>137649199</chatid>"));
         assert!(xml.contains("<maxlimit>0</maxlimit>"));
-        let first = xml.find("前").unwrap();
-        let second = xml.find("后").unwrap();
-        assert!(first < second, "应按时间排序");
+        let first = xml.find("earlier").unwrap();
+        let second = xml.find("later").unwrap();
+        assert!(first < second, "items should be sorted by time");
         assert!(xml.ends_with("</i>\n"));
     }
 
@@ -179,6 +180,7 @@ mod tests {
 
     #[test]
     fn keeps_emoji_and_chinese_untouched() {
+        // CJK text and emoji must pass through escaping unchanged.
         let raw = "前方高能 [doge] 😂";
         assert_eq!(escape(raw), raw);
         assert_eq!(unescape(raw), raw);

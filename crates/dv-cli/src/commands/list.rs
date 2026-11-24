@@ -1,4 +1,4 @@
-//! `dv list` —— 列出已备份视频。
+//! `dv list` — list backed-up videos.
 
 use anyhow::Result;
 use dv_core::Repository;
@@ -16,13 +16,13 @@ pub async fn run(ctx: &Context) -> Result<()> {
     }
 
     if rows.is_empty() {
-        println!("还没有备份任何视频：dv add <BV号>");
+        println!("No videos backed up yet: dv add <ID>");
         return Ok(());
     }
 
     println!(
-        "{:<14} {:>4} {:>10} {:>6}  最近同步",
-        "视频", "分P", "弹幕", "墓碑"
+        "{:<14} {:>5} {:>10} {:>10}  last sync",
+        "video", "part", "danmaku", "tombstones"
     );
     for row in &rows {
         let id = match &row.bvid {
@@ -32,14 +32,19 @@ pub async fn run(ctx: &Context) -> Result<()> {
         let synced = row
             .last_synced_at
             .map(ts_unix)
-            .unwrap_or_else(|| "从未".to_string());
+            .unwrap_or_else(|| "never".to_string());
         println!(
-            "{:<14} {:>4} {:>10} {:>6}  {}",
+            "{:<14} {:>5} {:>10} {:>10}  {}",
             id, row.page_count, row.danmaku_count, row.missing_count, synced
         );
     }
 
     let total: u64 = rows.iter().map(|r| r.danmaku_count).sum();
-    println!("\n共 {} 个视频 · {} 条弹幕", rows.len(), total);
+    println!(
+        "\n{} {} · {} danmaku",
+        rows.len(),
+        if rows.len() == 1 { "video" } else { "videos" },
+        total
+    );
     Ok(())
 }

@@ -6,7 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# 同一分支的新推送取消上一次运行，省额度
+# Cancel superseded runs on the same branch to save minutes
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -53,7 +53,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
         run: cargo test --workspace --all-targets
-      # 端到端冒烟：真建一个 vault 再自检，验证 schema、目录与写入都是通的
+      # End-to-end smoke test: create a real vault, then check it
       - name: smoke (init + doctor)
         shell: bash
         run: |
@@ -66,8 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # 仓库里有 rust-toolchain.toml（channel = stable），不加 override 的话
-      # 这里装的 1.88 会被文件里的 stable 顶掉，MSRV 校验就成了摆设。
+      # The repo pins `channel = stable` in rust-toolchain.toml. Without `override`
+      # that file shadows the 1.88 toolchain installed here and the MSRV check is a no-op.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.88.0

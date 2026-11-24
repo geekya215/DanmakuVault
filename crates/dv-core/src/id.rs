@@ -1,6 +1,7 @@
-//! 领域标识符。
+//! Domain identifiers.
 //!
-//! 全部用 newtype 包一层，避免把 `aid` 当 `cid` 传这类难以排查的错误。
+//! Each one is wrapped in a newtype so that a mistake like passing an `aid` where a `cid` is
+//! expected does not turn into a bug that is hard to track down.
 
 use std::fmt;
 use std::str::FromStr;
@@ -48,18 +49,22 @@ macro_rules! numeric_id {
 
             fn from_str(s: &str) -> Result<Self> {
                 s.trim().parse::<u64>().map(Self).map_err(|_| {
-                    VaultError::InvalidId(format!("{} 不是合法的 {}: {s}", s, stringify!($name)))
+                    VaultError::InvalidId(format!(
+                        "{} is not a valid {}: {s}",
+                        s,
+                        stringify!($name)
+                    ))
                 })
             }
         }
     };
 }
 
-numeric_id!(Aid, "稿件 id（av 号）");
-numeric_id!(Cid, "分 P 的 cid");
-numeric_id!(Dmid, "单条弹幕 id");
+numeric_id!(Aid, "video id (the av number)");
+numeric_id!(Cid, "cid of a part");
+numeric_id!(Dmid, "id of a single danmaku");
 
-/// BV 号，形如 `BV1GJ411x7h7`（大小写敏感，`BV` 前缀固定大写）。
+/// BV id, of the form `BV1GJ411x7h7` (case-sensitive; the `BV` prefix is always uppercase).
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -73,7 +78,7 @@ impl Bvid {
         if s.len() == 12 && body.len() == 10 && body.chars().all(|c| c.is_ascii_alphanumeric()) {
             Ok(Self(s.to_string()))
         } else {
-            Err(VaultError::InvalidId(format!("不是合法的 BV 号: {s}")))
+            Err(VaultError::InvalidId(format!("not a valid BV id: {s}")))
         }
     }
 
@@ -96,9 +101,10 @@ impl FromStr for Bvid {
     }
 }
 
-/// 用户给出的视频定位：至少知道 BV 或 av 之一。
+/// A video reference supplied by the user: at least one of BV or av is known.
 ///
-/// 绝大多数接口两者都要（`seg.so` 要 `oid=cid&pid=aid`），所以解析后通常还要调一次 `view` 补齐。
+/// Almost every endpoint needs both (`seg.so` wants `oid=cid&pid=aid`), so after parsing you
+/// usually still have to call `view` once to fill in the missing one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoRef {
     bvid: Option<Bvid>,
@@ -128,33 +134,34 @@ impl VideoRef {
         self.aid
     }
 
-    /// 解析用户输入：裸 BV 号、`av` 号、纯数字 aid，或视频页 URL。
+    /// Parse user input: a bare BV id, an `av` number, a plain numeric aid, or a video page URL.
     ///
-    /// 短链接（`b23.tv`）需要联网展开，这里明确报错而不是猜。
+    /// Short links (`b23.tv`) need network access to expand, so this reports an explicit error
+    /// instead of guessing.
     pub fn parse_input(input: &str) -> Result<Self> {
         let raw = input.trim();
         if raw.is_empty() {
-            return Err(VaultError::InvalidId("输入为空".into()));
+            return Err(VaultError::InvalidId("input is empty".into()));
         }
 
         if raw.contains("b23.tv") || raw.contains("bili2233.cn") {
             return Err(VaultError::InvalidId(
-                "短链接无法离线解析，请先在浏览器里打开并复制完整 URL 或 BV 号".into(),
+                "short links cannot be resolved offline; open the link in a browser first and copy the full URL or BV id"
+                    .into(),
             ));
         }
 
-        // 从 URL 中取出 /video/ 之后的那一段
+        // Take the piece after /video/ out of the URL
         let candidate = if raw.contains("://") || raw.starts_with("www.") {
-            let after = raw
-                .split("/video/")
-                .nth(1)
-                .ok_or_else(|| VaultError::InvalidId(format!("URL 里没找到 /video/ 段: {raw}")))?;
+            let after = raw.split("/video/").nth(1).ok_or_else(|| {
+                VaultError::InvalidId(format!("no /video/ segment found in URL: {raw}"))
+            })?;
             after
         } else {
             raw
         };
 
-        // 去掉查询串与锚点
+        // Strip the query string and fragment
         let candidate = candidate
             .split(['?', '#'])
             .next()
@@ -176,22 +183,26 @@ impl VideoRef {
                 .take_while(|c| c.is_ascii_digit())
                 .collect::<String>();
             if digits.is_empty() {
-                return Err(VaultError::InvalidId(format!("av 号缺少数字部分: {raw}")));
+                return Err(VaultError::InvalidId(format!(
+                    "av id is missing its numeric part: {raw}"
+                )));
             }
             return digits
                 .parse::<u64>()
                 .map(|n| Self::from_aid(Aid(n)))
-                .map_err(|_| VaultError::InvalidId(format!("av 号超出范围: {raw}")));
+                .map_err(|_| VaultError::InvalidId(format!("av id is out of range: {raw}")));
         }
 
         if candidate.chars().all(|c| c.is_ascii_digit()) && !candidate.is_empty() {
             return candidate
                 .parse::<u64>()
                 .map(|n| Self::from_aid(Aid(n)))
-                .map_err(|_| VaultError::InvalidId(format!("aid 超出范围: {raw}")));
+                .map_err(|_| VaultError::InvalidId(format!("aid is out of range: {raw}")));
         }
 
-        Err(VaultError::InvalidId(format!("无法识别的视频标识: {raw}")))
+        Err(VaultError::InvalidId(format!(
+            "unrecognized video identifier: {raw}"
+        )))
     }
 }
 

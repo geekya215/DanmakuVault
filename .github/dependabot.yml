@@ -1,7 +1,7 @@
 version: 2
 
 updates:
-  # 依赖更新按周聚合，避免一次开一堆 PR
+  # Group weekly dependency updates so they do not open a pile of PRs
   - package-ecosystem: cargo
     directory: '/'
     schedule:

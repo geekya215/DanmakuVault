@@ -1,6 +1,6 @@
-//! `Repository` 的 SQLite 实现。
+//! SQLite implementation of `Repository`.
 //!
-//! 所有写方法各自开一个事务；`Vault` 内部持一把连接锁，等价于单写者。
+//! Every write method opens its own transaction; `Vault` holds a single connection lock inside, which is equivalent to a single writer.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -14,7 +14,7 @@ use crate::vault::Vault;
 
 fn blob_to_hash(blob: Vec<u8>) -> Result<[u8; 32]> {
     blob.try_into()
-        .map_err(|_| VaultError::Corrupt("segment.sha256 长度不是 32 字节".into()))
+        .map_err(|_| VaultError::Corrupt("segment.sha256 is not 32 bytes long".into()))
 }
 
 impl Repository for Vault {
@@ -507,6 +507,7 @@ mod tests {
         VideoMeta {
             aid: Aid(1),
             bvid: Bvid::parse("BV1GJ411x7h7").ok(),
+            // CJK title on purpose: the roundtrip test checks that non-ASCII text survives storage.
             title: "测试稿件".into(),
             owner: Some(Owner {
                 mid: 9,
@@ -533,7 +534,7 @@ mod tests {
             fontsize: 25,
             color: 16_777_215,
             mid_hash: "abc".into(),
-            content: format!("弹幕 {dmid}"),
+            content: format!("danmaku {dmid}"),
             ctime: 1_700_000_000,
             weight: 5,
             pool: 0,
@@ -559,7 +560,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(by_bvid.aid.get(), 1);
-        // 幂等：重复 upsert 不产生重复分 P
+        // Idempotent: a repeated upsert must not create duplicate parts
         vault.upsert_video(&meta).unwrap();
         assert_eq!(vault.video_by_aid(Aid(1)).unwrap().unwrap().pages.len(), 1);
     }
@@ -590,7 +591,7 @@ mod tests {
 
         let loaded = vault.load_danmaku(Cid(11), true).unwrap();
         assert_eq!(loaded.len(), 2);
-        // 时间序稳定
+        // Chronological order is stable
         assert_eq!(loaded[0].dmid.get(), 100);
         assert_eq!(loaded[1].dmid.get(), 101);
     }
@@ -608,10 +609,10 @@ mod tests {
 
         let marked = vault.mark_missing(Cid(11), 2_000).unwrap();
         assert_eq!(marked, 1);
-        // 再来一次不会重复计数（墓碑已有值）
+        // Running it again must not count twice (the tombstone already has a value)
         assert_eq!(vault.mark_missing(Cid(11), 2_000).unwrap(), 0);
 
-        // 墓碑默认保留，但可以在读取时排除
+        // Tombstones are kept by default but can be excluded when reading
         assert_eq!(vault.load_danmaku(Cid(11), true).unwrap().len(), 2);
         let visible = vault.load_danmaku(Cid(11), false).unwrap();
         assert_eq!(visible.len(), 1);
@@ -659,7 +660,7 @@ mod tests {
             .upsert_danmaku(Cid(11), &[sample_danmaku(1, 0)], 1_000)
             .unwrap();
 
-        // 还没打墓碑时没有候选
+        // No candidates until a tombstone has been set
         assert_eq!(vault.count_missing_before(2_001).unwrap(), 0);
 
         vault.mark_missing(Cid(11), 2_000).unwrap();
@@ -670,7 +671,7 @@ mod tests {
         assert_eq!(outcome.affected, vec![Cid(11)]);
         assert!(vault.load_danmaku(Cid(11), true).unwrap().is_empty());
 
-        // gc 之后要靠它把文件重画回去
+        // After gc, this is what lets the files be redrawn on disk
         assert_eq!(
             vault.page_location(Cid(11)).unwrap(),
             Some(("BV1GJ411x7h7".to_string(), 1))

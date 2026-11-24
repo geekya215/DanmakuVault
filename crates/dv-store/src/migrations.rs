@@ -1,13 +1,13 @@
-//! schema 迁移：`PRAGMA user_version` 递进，只加不改。
+//! Schema migrations: step `PRAGMA user_version` forward, add-only, never rewrite.
 
 use rusqlite::Connection;
 
 use dv_core::{Result, VaultError};
 
-/// 当前程序支持的 schema 版本。
+/// The schema version this build supports.
 pub const SCHEMA_VERSION: i32 = 1;
 
-/// v1：视频 / 分 P / 弹幕 / 分段状态。
+/// v1: video / part / danmaku / segment state.
 const M001: &str = r#"
 CREATE TABLE video (
   aid            INTEGER PRIMARY KEY,
@@ -80,12 +80,12 @@ pub fn schema_version(conn: &Connection) -> Result<i32> {
         .map_err(db_err)
 }
 
-/// 把库升到 `SCHEMA_VERSION`；已是最新则什么都不做。
+/// Bring the database up to `SCHEMA_VERSION`; does nothing when already current.
 pub fn migrate(conn: &mut Connection) -> Result<()> {
     let current = schema_version(conn)?;
     if current > SCHEMA_VERSION {
         return Err(VaultError::Corrupt(format!(
-            "库 schema 版本 {current} 高于本程序支持的 {SCHEMA_VERSION}，请升级 DanmakuVault"
+            "database schema version {current} is newer than the {SCHEMA_VERSION} supported by this build; please upgrade DanmakuVault"
         )));
     }
     if current == SCHEMA_VERSION {
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(schema_version(&conn).unwrap(), 0);
         migrate(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
-        // 再跑一次不应报错、不应重复建表
+        // Running it again must neither error nor re-create the tables
         migrate(&mut conn).unwrap();
         let tables: Vec<String> = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")

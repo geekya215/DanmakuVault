@@ -1,11 +1,13 @@
-//! 令牌桶限速。
+//! Token bucket rate limiting.
 //!
-//! 只限制「每秒发几个请求」，与并发上限是两件事，不要混。
+//! This only limits how many requests are issued per second; the concurrency cap is a separate
+//! concern, so do not conflate the two.
 
 use std::sync::Mutex;
 use std::time::Duration;
 
-// 用 tokio 的 Instant：这样 `tokio::time::pause()` 能控制限速器，测试不用真等。
+// Use tokio's Instant so `tokio::time::pause()` can drive the limiter; tests do not have to
+// actually wait.
 use tokio::time::Instant;
 
 pub struct RateLimiter {
@@ -33,7 +35,7 @@ impl RateLimiter {
         }
     }
 
-    /// 取一个令牌，不够就睡到够。
+    /// Take one token; sleep until one is available if there is none.
     pub async fn acquire(&self) {
         loop {
             let wait_secs = {
@@ -62,12 +64,12 @@ mod tests {
     async fn burst_is_immediate_then_paced() {
         let limiter = RateLimiter::new(2.0, 2);
         let start = Instant::now();
-        // 前两个走 burst，不等待
+        // The first two come out of the burst and do not wait
         limiter.acquire().await;
         limiter.acquire().await;
         assert!(start.elapsed() < Duration::from_millis(50));
 
-        // 第三个要等约 500ms（2 qps）
+        // The third must wait about 500 ms at 2 qps
         limiter.acquire().await;
         assert!(start.elapsed() >= Duration::from_millis(450));
     }

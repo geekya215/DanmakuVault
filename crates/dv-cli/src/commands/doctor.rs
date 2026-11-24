@@ -1,6 +1,6 @@
-//! `dv doctor` —— 环境自检。
+//! `dv doctor` — environment check.
 //!
-//! 只报告「能不能干活」，不打印任何凭据内容。
+//! Only reports whether the tool can do its job; never prints the content of any credential.
 
 use std::fs;
 
@@ -36,89 +36,87 @@ struct DoctorReport {
 
 pub fn run(ctx: &config::Context) -> Result<()> {
     let mut checks = vec![Check::new(
-        "程序版本",
+        "version",
         true,
         format!("dv {}", env!("CARGO_PKG_VERSION")),
     )];
 
-    // vault 目录
+    // vault directory
     let root_exists = ctx.vault_root.is_dir();
     checks.push(Check::new(
-        "vault 目录",
+        "vault dir",
         root_exists,
         ctx.vault_root.display().to_string(),
     ));
 
-    // 写权限探针：真的写一个小文件再删掉
+    // Write-permission probe: actually write a small file, then delete it
     let probe = ctx.vault_root.join(".doctor-probe");
     let writable = fs::create_dir_all(&ctx.vault_root)
         .and_then(|_| fs::write(&probe, b"ok"))
         .is_ok();
     let _ = fs::remove_file(&probe);
     checks.push(Check::new(
-        "目录可写",
+        "write access",
         writable,
         if writable {
-            "可写".to_string()
+            "ok".to_string()
         } else {
-            "不可写（检查权限）".to_string()
+            "denied (check permissions)".to_string()
         },
     ));
 
-    // 数据库
+    // Database
     let mut db_ok = false;
     match Vault::open(&ctx.vault_root) {
         Ok(vault) => {
             db_ok = true;
             match vault.schema_version() {
-                Ok(version) => {
-                    checks.push(Check::new("数据库 schema", true, format!("v{version}")))
-                }
-                Err(err) => checks.push(Check::new("数据库 schema", false, err.to_string())),
+                Ok(version) => checks.push(Check::new("db schema", true, format!("v{version}"))),
+                Err(err) => checks.push(Check::new("db schema", false, err.to_string())),
             }
             match vault.stats() {
                 Ok(stats) => checks.push(Check::new(
-                    "数据规模",
+                    "data size",
                     true,
                     format!(
-                        "视频 {} · 分P {} · 弹幕 {}（墓碑 {}） · 分段 {}",
+                        "videos {} · parts {} · danmaku {} (tombstones {}) · segments {}",
                         stats.videos, stats.pages, stats.danmaku, stats.missing, stats.segments
                     ),
                 )),
-                Err(err) => checks.push(Check::new("数据规模", false, err.to_string())),
+                Err(err) => checks.push(Check::new("data size", false, err.to_string())),
             }
         }
-        Err(err) => checks.push(Check::new("数据库", false, err.to_string())),
+        Err(err) => checks.push(Check::new("database", false, err.to_string())),
     }
 
-    // 配置缺失不算失败：内置默认值就能跑，只是少了可调项。
+    // A missing config is not a failure: the built-in defaults are enough to run, only the tunables are gone.
     checks.push(Check::new(
-        "配置文件",
+        "config file",
         true,
         if ctx.config_path.exists() {
             ctx.config_path.display().to_string()
         } else {
-            format!("{}（不存在，使用默认值）", ctx.config_path.display())
+            format!("{} (missing, using defaults)", ctx.config_path.display())
         },
     ));
 
-    // 认证：M1 起生效
+    // Authentication: in effect from M1 on
     let cookie = std::env::var_os("DV_COOKIE").is_some();
     checks.push(Check::new(
-        "登录凭据",
+        "credentials",
         true,
         if cookie {
-            "已通过 DV_COOKIE 提供".to_string()
+            "provided via DV_COOKIE".to_string()
         } else {
-            "未提供（匿名模式，限速更严）".to_string()
+            "not provided (anonymous mode, stricter rate limit)".to_string()
         },
     ));
 
     checks.push(Check::new(
-        "运行参数",
+        "parameters",
         true,
         format!(
-            "qps {:.1} · 并发 {} · 超时 {}s",
+            "qps {:.1} · concurrency {} · timeout {}s",
             ctx.config.net.qps, ctx.config.sync.concurrency, ctx.config.net.timeout_secs
         ),
     ));
@@ -130,7 +128,7 @@ pub fn run(ctx: &config::Context) -> Result<()> {
     } else {
         for check in &checks {
             println!(
-                "{} {:<12} {}",
+                "{} {:<13} {}",
                 if check.ok { "✓" } else { "✗" },
                 check.name,
                 check.detail
@@ -140,15 +138,17 @@ pub fn run(ctx: &config::Context) -> Result<()> {
         println!(
             "{}",
             if ok {
-                "自检通过"
+                "environment check passed"
             } else {
-                "自检未通过"
+                "environment check failed"
             }
         );
     }
 
     if !ok {
-        anyhow::bail!("自检未通过，请先运行 `dv init` 或修复上面标记 ✗ 的项目");
+        anyhow::bail!(
+            "environment check failed; run `dv init` first or fix the items marked ✗ above"
+        );
     }
     Ok(())
 }

@@ -17,10 +17,10 @@ async fn main() -> ExitCode {
     match run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            // 领域错误只打印摘要，避免把 anyhow 的调用链塞给用户。
+            // Domain errors print only the summary, so users never see anyhow's call chain.
             match err.downcast_ref::<VaultError>() {
-                Some(vault_err) => eprintln!("错误: {vault_err}"),
-                None => eprintln!("错误: {err:#}"),
+                Some(vault_err) => eprintln!("error: {vault_err}"),
+                None => eprintln!("error: {err:#}"),
             }
             ExitCode::from(exit_code(&err))
         }
@@ -43,7 +43,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-/// 退出码约定见 `docs/design.md` §9.3。
+/// Exit code conventions are documented in `docs/design.md` §9.3.
 fn exit_code(err: &anyhow::Error) -> u8 {
     match err.downcast_ref::<VaultError>() {
         Some(VaultError::InvalidId(_)) => 2,

@@ -1,11 +1,11 @@
-//! `dv add` —— 解析视频元信息并登记到库里（不抓弹幕）。
+//! `dv add` — resolve video metadata and register it in the database (danmaku is not fetched).
 
 use anyhow::Result;
 use dv_core::{DanmakuSource, Repository, VideoRef};
 use serde::Serialize;
 
 use crate::cli::AddArgs;
-use crate::commands::{blocking, build_client, open_vault, print_json, write_video_meta};
+use crate::commands::{blocking, build_client, open_vault, plural, print_json, write_video_meta};
 use crate::config::Context;
 
 #[derive(Serialize)]
@@ -32,7 +32,7 @@ pub async fn run(ctx: &Context, args: &AddArgs) -> Result<()> {
 
         if !ctx.json {
             println!(
-                "✓ {:<14} 《{}》 {} 个分P",
+                "✓ {:<14} \"{}\" {} parts",
                 meta.folder_name(),
                 meta.title,
                 meta.pages.len()
@@ -50,7 +50,11 @@ pub async fn run(ctx: &Context, args: &AddArgs) -> Result<()> {
     if ctx.json {
         print_json(&added)?;
     } else {
-        println!("\n已登记 {} 个视频，运行 `dv sync` 抓取弹幕", added.len());
+        println!(
+            "\nRegistered {} {}; run `dv sync` to fetch danmaku",
+            added.len(),
+            plural(added.len(), "video", "videos")
+        );
     }
     Ok(())
 }

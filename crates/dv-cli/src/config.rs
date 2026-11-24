@@ -1,6 +1,7 @@
-//! 配置：内置默认 → 配置文件 → 环境变量 → 命令行。
+//! Config layering: built-in defaults → config file → environment variables → command line.
 //!
-//! 只加载需要的字段；写回时保持结构稳定，方便用户手工编辑。
+//! Only the fields that are needed get loaded; writes keep the structure stable so the file
+//! stays easy to edit by hand.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,20 +25,20 @@ pub struct Config {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VaultConfig {
-    /// 留空表示用平台数据目录。
+    /// Empty means the platform data directory is used.
     pub root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NetConfig {
-    /// 全局限速（每秒请求数）。
+    /// Global rate limit (requests per second).
     pub qps: f32,
     pub burst: u32,
     pub timeout_secs: u64,
     pub max_retries: u32,
     pub user_agent: String,
-    /// 例如 `http://127.0.0.1:7890`。
+    /// For example, `http://127.0.0.1:7890`.
     pub proxy: Option<String>,
 }
 
@@ -61,15 +62,15 @@ impl Default for NetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SyncConfig {
-    /// 同时在途的视频数。
+    /// Number of videos in flight at once.
     pub concurrency: usize,
-    /// 保留原始分段字节（便于复核，占空间）。
+    /// Keep the raw segment bytes (useful for re-checking, but uses disk space).
     pub save_raw_segments: bool,
-    /// 全量同步后没再看到的弹幕保留为墓碑，不物理删除。
+    /// Danmaku no longer seen after a full sync are kept as tombstones, never physically deleted.
     pub retain_missing: bool,
-    /// 段数按视频时长算完之后再多探一段。
+    /// Probe one extra segment after counting segments from the video duration.
     pub probe_extra_segment: bool,
-    /// 已完整同步过的分 P 在这个间隔内跳过（秒）；0 表示每次都重新检查。
+    /// Parts already fully synced are skipped for this interval (seconds); 0 re-checks every time.
     pub refresh_interval_secs: u64,
 }
 
@@ -89,7 +90,7 @@ impl Default for SyncConfig {
 #[serde(default)]
 pub struct ExportConfig {
     pub default_format: String,
-    /// 导出 XML 时同时写一份无损 JSONL。
+    /// Also write a lossless JSONL copy when exporting XML.
     pub write_jsonl: bool,
 }
 
@@ -102,7 +103,7 @@ impl Default for ExportConfig {
     }
 }
 
-/// 一次命令运行的上下文：已解析的路径与配置。
+/// Context for one command run: resolved paths and config.
 #[derive(Debug, Clone)]
 pub struct Context {
     pub vault_root: PathBuf,
@@ -149,33 +150,32 @@ pub fn default_vault_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("dv-vault"))
 }
 
-/// 配置文件不存在时返回默认值，而不是报错。
+/// Return defaults when the config file is missing instead of failing.
 pub fn load_config(path: &Path) -> Result<Config> {
     match fs::read_to_string(path) {
-        Ok(raw) => {
-            toml::from_str(&raw).with_context(|| format!("配置文件解析失败: {}", path.display()))
-        }
+        Ok(raw) => toml::from_str(&raw)
+            .with_context(|| format!("failed to parse config file: {}", path.display())),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-        Err(err) => Err(err).with_context(|| format!("读取配置失败: {}", path.display())),
+        Err(err) => Err(err).with_context(|| format!("failed to read config: {}", path.display())),
     }
 }
 
-/// 写入默认配置；`force` 为假且文件已存在时跳过。
+/// Write the default config; skipped when `force` is false and the file already exists.
 ///
-/// 返回是否真的写了。
+/// Returns whether anything was actually written.
 pub fn write_default_config(path: &Path, vault_root: &Path, force: bool) -> Result<bool> {
     if path.exists() && !force {
         return Ok(false);
     }
     let mut config = Config::default();
     config.vault.root = Some(vault_root.to_path_buf());
-    let text = toml::to_string_pretty(&config).context("序列化默认配置失败")?;
+    let text = toml::to_string_pretty(&config).context("failed to serialize the default config")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("创建配置目录失败: {}", parent.display()))?;
+            .with_context(|| format!("failed to create config directory: {}", parent.display()))?;
     }
     dv_store::write_atomic(path, text.as_bytes())
-        .with_context(|| format!("写配置失败: {}", path.display()))?;
+        .with_context(|| format!("failed to write config: {}", path.display()))?;
     Ok(true)
 }
 

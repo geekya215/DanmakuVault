@@ -1,7 +1,8 @@
-//! 无损 JSONL：一行一条弹幕。
+//! Lossless JSONL: one danmaku per line.
 //!
-//! 字段名与数据库列一一对应，字段顺序固定（`serde` 按声明顺序输出），
-//! 因此同一份数据反复导出字节完全相同。
+//! Field names map one-to-one to database columns, and the field order is fixed (`serde`
+//! emits fields in declaration order), so exporting the same data repeatedly produces
+//! byte-identical output.
 
 use dv_core::Danmaku;
 use serde::{Deserialize, Serialize};
@@ -63,7 +64,7 @@ impl From<JsonlDanmaku> for Danmaku {
     }
 }
 
-/// 渲染成 JSONL 文本（每条一行，末尾带换行）。
+/// Render as JSONL text (one record per line, each line newline-terminated).
 pub fn render(items: &[Danmaku]) -> String {
     let ordered = sorted(items);
     let mut out = String::with_capacity(ordered.len() * 160);
@@ -79,7 +80,7 @@ pub fn render(items: &[Danmaku]) -> String {
     out
 }
 
-/// 解析 JSONL（用于校验与再导入）。
+/// Parse JSONL (used for verification and re-import).
 pub fn parse(text: &str) -> Result<Vec<Danmaku>, serde_json::Error> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -117,17 +118,17 @@ mod tests {
     #[test]
     fn roundtrips_losslessly() {
         let items = vec![
-            dm(2, 2_000, "带 \"引号\" 和 emoji 😂"),
-            dm(1, 1_000, "第一"),
+            dm(2, 2_000, "with \"quotes\" and emoji 😂"),
+            dm(1, 1_000, "first"),
         ];
         let text = render(&items);
         assert_eq!(text.lines().count(), 2);
 
         let back = parse(&text).unwrap();
         assert_eq!(back.len(), 2);
-        // 有损字段（extras）之外应当完全一致，且已排序
+        // Everything but the lossy `extras` field must match exactly, and the output is sorted
         assert_eq!(back[0].dmid.get(), 1);
-        assert_eq!(back[1].content, "带 \"引号\" 和 emoji 😂");
+        assert_eq!(back[1].content, "with \"quotes\" and emoji 😂");
     }
 
     #[test]

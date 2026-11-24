@@ -1,6 +1,6 @@
-//! `dv export` —— 把库里的弹幕导出成文件。
+//! `dv export` — export the danmaku in the database to files.
 //!
-//! 默认写到 vault 内的 `videos/<id>/p<N>/`，也可以用 `--out` 导到任意目录。
+//! By default it writes to `videos/<id>/p<N>/` inside the vault; `--out` exports to any directory instead.
 
 use anyhow::Result;
 use dv_core::{PageMeta, Repository, VideoRef};
@@ -8,7 +8,7 @@ use dv_export::{jsonl, xml};
 use serde::Serialize;
 
 use crate::cli::ExportArgs;
-use crate::commands::{blocking, open_vault, print_json};
+use crate::commands::{blocking, open_vault, plural, print_json};
 use crate::config::Context;
 
 #[derive(Serialize)]
@@ -36,7 +36,7 @@ pub async fn run(ctx: &Context, args: &ExportArgs) -> Result<()> {
 
     let Some(meta) = meta else {
         anyhow::bail!(
-            "库里没有 {}（先运行 `dv add {}` 再 `dv sync`）",
+            "No {} in the database (run `dv add {}` first, then `dv sync`)",
             args.id,
             args.id
         );
@@ -57,7 +57,7 @@ pub async fn run(ctx: &Context, args: &ExportArgs) -> Result<()> {
         let items = blocking(move || worker.load_danmaku(cid, include_missing)).await?;
 
         if items.is_empty() {
-            eprintln!("  p{} 没有弹幕，跳过", page.page);
+            eprintln!("  p{} has no danmaku, skipping", page.page);
             continue;
         }
 
@@ -72,7 +72,7 @@ pub async fn run(ctx: &Context, args: &ExportArgs) -> Result<()> {
 
         if !ctx.json {
             println!(
-                "  p{:<3} {:>7} 条 → {}",
+                "  p{:<3} {:>7} items → {}",
                 page.page,
                 items.len(),
                 path.display()
@@ -93,8 +93,9 @@ pub async fn run(ctx: &Context, args: &ExportArgs) -> Result<()> {
 
     let total: usize = exported.iter().map(|e| e.danmaku).sum();
     println!(
-        "\n导出 {} 个分P · {} 条弹幕 · {}",
+        "\nExported {} {} · {} danmaku · {}",
         exported.len(),
+        plural(exported.len(), "part", "parts"),
         total,
         args.format
     );
@@ -109,10 +110,10 @@ fn select_pages(pages: &[PageMeta], spec: &str) -> Result<Vec<PageMeta>> {
     }
     let want: u32 = spec
         .parse()
-        .map_err(|_| anyhow::anyhow!("--page 只接受分P序号（如 2）或 all"))?;
+        .map_err(|_| anyhow::anyhow!("--page accepts only a part number (e.g. 2) or all"))?;
     let selected: Vec<PageMeta> = pages.iter().filter(|p| p.page == want).cloned().collect();
     if selected.is_empty() {
-        anyhow::bail!("没有分P {want}（该视频共 {} 个分P）", pages.len());
+        anyhow::bail!("no part {want} (this video has {} parts)", pages.len());
     }
     Ok(selected)
 }

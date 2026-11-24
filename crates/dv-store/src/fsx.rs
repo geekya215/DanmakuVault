@@ -1,6 +1,7 @@
-//! 崩溃安全的文件写入。
+//! Crash-safe file writes.
 //!
-//! 统一走「临时文件 → fsync → rename」，任何一步中断都不会留下半截文件。
+//! Everything goes through "temp file → fsync → rename", so an interruption at any
+//! step never leaves a half-written file behind.
 
 use std::fs;
 use std::io::Write;
@@ -11,9 +12,10 @@ pub fn create_dir_all(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
-/// 测试用临时目录，放在 `target/` 下。
+/// Scratch directory for tests, placed under `target/`.
 ///
-/// 不用 `std::env::temp_dir()`：某些环境（沙箱、CI 容器）会对系统临时目录做额外限制。
+/// Deliberately not `std::env::temp_dir()`: some environments (sandboxes, CI
+/// containers) impose extra restrictions on the system temp directory.
 pub fn scratch_dir(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -23,7 +25,7 @@ pub fn scratch_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// 原子写入：同目录临时文件 + `sync_all` + `rename` 覆盖。
+/// Atomic write: temp file in the same directory + `sync_all` + `rename` over the target.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
@@ -71,7 +73,7 @@ mod tests {
         write_atomic(&path, b"one").unwrap();
         write_atomic(&path, b"two").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"two");
-        // 不留临时文件
+        // No temp files left behind
         let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap())
             .unwrap()
             .filter_map(|e| e.ok())

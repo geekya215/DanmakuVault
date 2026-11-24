@@ -1,12 +1,12 @@
-//! `dv sync` —— 抓弹幕。
+//! `dv sync` — fetch danmaku.
 //!
-//! 两种模式，由「这个分 P 是否曾经完整同步过」决定：
+//! Two modes, chosen by whether this part has ever been fully synced:
 //!
-//! * **断点续传**（从未完整同步）：跳过库里已有的段，补齐剩下的。崩溃重跑走这条。
-//! * **刷新**（已完整同步过）：全量重抓，比对段哈希，并在全段成功后标记墓碑。
+//! * **Resume** (never fully synced): skip segments already in the database and fetch the rest. A rerun after a crash takes this path.
+//! * **Refresh** (already fully synced): full refetch, compare segment hashes, and mark tombstones only after every segment succeeds.
 //!
-//! 之所以要分开，是因为墓碑（"这条弹幕服务端没了"）只有在「本轮真的把每一段都看过」
-//! 时才成立。用缓存段拼出来的视图不能用来判定消失。
+//! The split exists because a tombstone ("the server no longer has this danmaku") only holds
+//! when every segment was really seen in this run. A view assembled from cached segments must not be used to decide that something disappeared.
 
 use std::sync::Arc;
 
@@ -22,7 +22,8 @@ use tracing::info;
 
 use crate::cli::SyncArgs;
 use crate::commands::{
-    blocking, build_client, open_vault, print_json, ts_unix, write_page_artifacts, write_video_meta,
+    blocking, build_client, open_vault, plural, print_json, ts_unix, write_page_artifacts,
+    write_video_meta,
 };
 use crate::config::{Config, Context};
 
@@ -50,7 +51,7 @@ struct VideoOutcome {
     error: Option<String>,
 }
 
-/// 每次 sync 都会落一份机器可读报告，便于事后回溯「那次同步到底做了什么」。
+/// Every sync writes a machine-readable report, so you can later reconstruct exactly what that run did.
 #[derive(Debug, Serialize)]
 struct RunReport {
     app: &'static str,
@@ -67,24 +68,27 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
     let targets = resolve_targets(&vault, &client, args).await?;
 
     if targets.is_empty() {
-        println!("没有可同步的视频：先运行 `dv add <BV号>`");
+        println!("No videos to sync: run `dv add <BV id>` first");
         return Ok(());
     }
 
     if args.dry_run {
         for meta in &targets {
             println!(
-                "将同步 {:<14} 《{}》 {} 个分P",
+                "Would sync {:<14} \"{}\" ({} {})",
                 meta.folder_name(),
                 meta.title,
-                meta.pages.len()
+                meta.pages.len(),
+                plural(meta.pages.len(), "part", "parts")
             );
             for page in &meta.pages {
+                let segments = page.nominal_segments();
                 println!(
-                    "  p{:<3} cid={:<12} 约 {} 段",
+                    "  p{:<3} cid={:<12} ~{} {}",
                     page.page,
                     page.cid.get(),
-                    page.nominal_segments()
+                    segments,
+                    plural(segments as usize, "segment", "segments")
                 );
             }
         }
@@ -103,7 +107,7 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
         match result {
             Ok(()) => {
                 totals.videos += 1;
-                println!("✓ {:<14} 《{}》", meta.folder_name(), meta.title);
+                println!("✓ {:<14} \"{}\"", meta.folder_name(), meta.title);
                 outcomes.push(VideoOutcome {
                     id: meta.folder_name(),
                     title: meta.title.clone(),
@@ -114,7 +118,7 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
             }
             Err(err) => {
                 totals.videos_failed += 1;
-                eprintln!("✗ {:<14} 《{}》: {err}", meta.folder_name(), meta.title);
+                eprintln!("✗ {:<14} \"{}\": {err}", meta.folder_name(), meta.title);
                 outcomes.push(VideoOutcome {
                     id: meta.folder_name(),
                     title: meta.title.clone(),
@@ -140,7 +144,7 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
         print_json(&report)?;
     } else {
         println!(
-            "\n视频 {}（失败 {}） · 分P {}（跳过 {} 失败 {}） · 分段 {}{}",
+            "\nVideos {} (failed {}) · parts {} (skipped {} failed {}) · segments {}{}",
             totals.videos,
             totals.videos_failed,
             totals.pages,
@@ -148,26 +152,26 @@ pub async fn run(ctx: &Context, args: &SyncArgs) -> Result<()> {
             totals.pages_failed,
             totals.segments,
             if totals.segments_cached > 0 {
-                format!("（复用 {}）", totals.segments_cached)
+                format!(" (reused {})", totals.segments_cached)
             } else {
                 String::new()
             }
         );
         if totals.segments_empty > 0 {
             println!(
-                "其中 {} 个空分段（该时间段没有弹幕）",
+                "Of those, {} empty segments (no danmaku in that time range)",
                 totals.segments_empty
             );
         }
         println!(
-            "弹幕 新增 {} · 覆盖 {} · 标记消失 {}",
+            "Danmaku added {} · seen {} · marked missing {}",
             totals.danmaku_added, totals.danmaku_seen, totals.marked_missing
         );
-        println!("报告 {}", report_path.display());
+        println!("Report {}", report_path.display());
     }
 
     if totals.videos_failed > 0 || totals.pages_failed > 0 {
-        anyhow::bail!("部分视频同步失败，已成功的数据保留；重跑会从断点继续");
+        anyhow::bail!("Some videos failed to sync; data that succeeded is kept, and a rerun resumes from where it stopped");
     }
     Ok(())
 }
@@ -221,12 +225,15 @@ async fn sync_video(
         let cid = page.cid;
         let synced_at = blocking(move || worker.page_synced_at(cid)).await?;
 
-        // 新鲜度：刚同步过的跳过，避免用户手抖连点造成无意义请求。
+        // Freshness: skip what was just synced, so an accidental double click does not cause pointless requests.
         if !force && cfg.sync.refresh_interval_secs > 0 {
             if let Some(ts) = synced_at {
                 if run_start.saturating_sub(ts) < cfg.sync.refresh_interval_secs as i64 {
                     totals.pages_skipped += 1;
-                    info!(page = page.page, "分P 未到刷新间隔，跳过");
+                    info!(
+                        page = page.page,
+                        "part is within the refresh interval, skipping"
+                    );
                     continue;
                 }
             }
@@ -238,13 +245,13 @@ async fn sync_video(
             Err(err) => {
                 totals.pages_failed += 1;
                 failed_pages.push(page.page);
-                eprintln!("  p{} 失败: {err}", page.page);
+                eprintln!("  p{} failed: {err}", page.page);
             }
         }
     }
 
     if !failed_pages.is_empty() {
-        anyhow::bail!("分P {failed_pages:?} 未完成");
+        anyhow::bail!("parts {failed_pages:?} did not finish");
     }
     Ok(())
 }
@@ -261,7 +268,7 @@ async fn sync_page(
     totals: &mut Totals,
 ) -> Result<()> {
     let nominal = page.nominal_segments();
-    // 实际段数可能多于「时长 / 6min」，留几段的探测余量。
+    // The real segment count can exceed "duration / 6min", so leave a few segments of probe headroom.
     let hard_limit = nominal + if cfg.sync.probe_extra_segment { 5 } else { 0 };
 
     let mut index = 1u32;
@@ -269,7 +276,7 @@ async fn sync_page(
     let mut had_cached = false;
 
     while index <= hard_limit {
-        // 超出名义段数后，只有上一段非空才值得继续探测。
+        // Past the nominal segment count, further probing is worthwhile only if the previous segment was non-empty.
         if index > nominal && !(cfg.sync.probe_extra_segment && last_nonempty) {
             break;
         }
@@ -313,7 +320,7 @@ async fn sync_page(
         let worker = vault.clone();
         let cid = page.cid;
         let items = segment.items;
-        // 空分段不落 segment 记录：它没有任何数据，留着只会让「段数」统计失真。
+        // Empty segments get no segment record: they hold no data, and keeping them would only skew the segment count.
         let keep_state = !items.is_empty();
         let stats = blocking(move || {
             let stats = worker.upsert_danmaku(cid, &items, run_start)?;
@@ -324,11 +331,16 @@ async fn sync_page(
         })
         .await?;
 
-        // 立刻计入总计：万一段 3 失败，前两段的成果也该出现在报告里。
+        // Count into the totals immediately: if segment 3 fails, the first two segments' results should still show up in the report.
         totals.danmaku_added += stats.inserted;
         totals.danmaku_seen += stats.total();
         if index <= nominal {
-            info!(page = page.page, index, items = stats.total(), "分段完成");
+            info!(
+                page = page.page,
+                index,
+                items = stats.total(),
+                "segment complete"
+            );
         }
         index += 1;
     }
@@ -339,7 +351,7 @@ async fn sync_page(
     let page_no = page.page;
     let write_jsonl = cfg.export.write_jsonl;
     let marked = blocking(move || {
-        // 只有「每段都是本轮新抓的」才能判定哪些弹幕消失了。
+        // Only when every segment was fetched fresh in this run can we determine which danmaku disappeared.
         let marked = if had_cached {
             0
         } else {
@@ -355,7 +367,7 @@ async fn sync_page(
     Ok(())
 }
 
-/// 写本次运行的报告文件，返回路径。
+/// Write this run's report file and return its path.
 async fn write_report(vault: &Arc<Vault>, report: &RunReport) -> Result<std::path::PathBuf> {
     let path = vault
         .paths()
@@ -367,7 +379,7 @@ async fn write_report(vault: &Arc<Vault>, report: &RunReport) -> Result<std::pat
     Ok(path)
 }
 
-/// 文件名精确到毫秒：同一秒内连跑两次也不会互相覆盖。
+/// The filename is precise to the millisecond, so two runs within the same second do not overwrite each other.
 fn report_stamp() -> String {
     let format = time::macros::format_description!(
         "[year][month][day]T[hour][minute][second][subsecond digits:3]Z"

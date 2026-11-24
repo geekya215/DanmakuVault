@@ -1,4 +1,5 @@
-//! 重试策略：指数退避 + 抖动，风控（-412）单独加长。
+//! Retry policy: exponential backoff plus jitter, with a longer wait for anti-bot protection
+//! (-412).
 
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -28,7 +29,7 @@ impl RetryPolicy {
         self
     }
 
-    /// 执行 `op`，可重试错误按退避重试。
+    /// Run `op`; retryable errors are retried with backoff.
     pub async fn run<T, F, Fut>(&self, mut op: F) -> Result<T>
     where
         F: FnMut() -> Fut,
@@ -44,7 +45,7 @@ impl RetryPolicy {
                     }
                     attempt += 1;
                     let delay = self.delay_for(attempt, &err);
-                    tracing::warn!(attempt, delay_ms = delay.as_millis(), error = %err, "请求失败，退避重试");
+                    tracing::warn!(attempt, delay_ms = delay.as_millis(), error = %err, "request failed, backing off before retrying");
                     tokio::time::sleep(delay).await;
                 }
             }
@@ -52,7 +53,7 @@ impl RetryPolicy {
     }
 
     fn delay_for(&self, attempt: u32, err: &VaultError) -> Duration {
-        // 风控至少要等一分钟，避免越重试越糟。
+        // Anti-bot protection needs at least a minute; retrying harder only makes it worse.
         let rate_limited = matches!(err, VaultError::RateLimited);
         let base = if rate_limited {
             Duration::from_secs(60)
@@ -70,7 +71,7 @@ impl RetryPolicy {
     }
 }
 
-/// ±20% 抖动，避免同一批请求齐步走。
+/// ±20% jitter so a batch of requests does not march in lockstep.
 fn jitter(base: Duration) -> Duration {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

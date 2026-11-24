@@ -1,4 +1,4 @@
-//! `dv show` —— 单个视频的同步状态。
+//! `dv show` — sync state of a single video.
 
 use anyhow::Result;
 use dv_core::{PageStats, Repository, VideoRef};
@@ -44,7 +44,11 @@ pub async fn run(ctx: &Context, args: &ShowArgs) -> Result<()> {
     .await?;
 
     let Some(meta) = meta else {
-        anyhow::bail!("库里没有 {}（先运行 `dv add {}`）", args.id, args.id);
+        anyhow::bail!(
+            "no {} in the database (run `dv add {}` first)",
+            args.id,
+            args.id
+        );
     };
 
     let pages = meta.pages.clone();
@@ -74,7 +78,7 @@ pub async fn run(ctx: &Context, args: &ShowArgs) -> Result<()> {
         owner: meta
             .owner
             .as_ref()
-            .map(|o| format!("{}（mid {}）", o.name, o.mid)),
+            .map(|o| format!("{} (mid {})", o.name, o.mid)),
         duration_ms: meta.duration_ms,
         pages: rows,
     };
@@ -83,25 +87,25 @@ pub async fn run(ctx: &Context, args: &ShowArgs) -> Result<()> {
         return print_json(&report);
     }
 
-    println!("{}  《{}》", report.id, report.title);
+    println!("{}  \"{}\"", report.id, report.title);
     if let Some(owner) = &report.owner {
         println!("UP        {owner}");
     }
-    println!("时长      {}s", report.duration_ms / 1000);
+    println!("duration  {}s", report.duration_ms / 1000);
     println!();
     println!(
-        "{:<4} {:>13} {:>8} {:>6} {:>4}  最近同步",
-        "分P", "cid", "弹幕", "墓碑", "分段"
+        "{:<4} {:>13} {:>10} {:>10} {:>8}  last sync",
+        "part", "cid", "danmaku", "tombstones", "segments"
     );
     for row in &report.pages {
         println!(
-            "{:<4} {:>13} {:>8} {:>6} {:>4}  {}",
+            "{:<4} {:>13} {:>10} {:>10} {:>8}  {}",
             row.page,
             row.cid,
             row.danmaku,
             row.missing,
             row.segments,
-            row.synced_at.clone().unwrap_or_else(|| "从未".to_string())
+            row.synced_at.clone().unwrap_or_else(|| "never".to_string())
         );
     }
     Ok(())

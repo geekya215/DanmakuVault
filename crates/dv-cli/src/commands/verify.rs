@@ -1,13 +1,13 @@
-//! `dv verify` —— 校验备份是否完整、文件与库是否一致。
+//! `dv verify` — check that the backup is complete and that files match the database.
 //!
-//! 三层检查：
+//! Three layers of checks:
 //!
-//! 1. **库内一致性**：分段记录数 vs 时长推算的名义段数、是否有弹幕；
-//! 2. **文件一致性**：把库重新渲染成 XML，与磁盘上的文件逐字节比较（能发现手工改动、
-//!    写入中断、磁盘损坏）；
-//! 3. **上游一致性**（`--deep`）：逐段重新拉取并比对 sha256，报告「有哪些段变了」。
+//! 1. **Database consistency**: recorded segment count vs the nominal count derived from duration, and whether any danmaku exist;
+//! 2. **File consistency**: re-render the database as XML and compare it byte for byte with the file on disk (this catches manual edits,
+//!    interrupted writes, and disk corruption);
+//! 3. **Upstream consistency** (`--deep`): refetch each segment and compare sha256, reporting which segments changed.
 //!
-//! 第 3 项不判断对错：上游变了是正常现象，只提示备份已过期。
+//! Check 3 does not judge right or wrong: upstream changing is normal, and it only signals that the backup is stale.
 
 use anyhow::Result;
 use dv_bili::BiliClient;
@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::cli::VerifyArgs;
-use crate::commands::{blocking, build_client, open_vault, print_json};
+use crate::commands::{blocking, build_client, open_vault, plural, print_json};
 use crate::config::Context;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -36,7 +36,7 @@ struct PageCheck {
     segments_recorded: u32,
     segments_expected: u32,
     xml: XmlState,
-    /// 本次深度校验里内容发生变化的段号。
+    /// Segment numbers whose content changed during this deep check.
     changed_segments: Vec<u32>,
     problems: Vec<String>,
 }
@@ -57,9 +57,9 @@ struct VideoCheck {
 #[derive(Debug, Serialize)]
 struct VerifyReport {
     deep: bool,
-    /// 阻断性问题（文件缺失/损坏/库不一致）的数量。
+    /// Number of blocking problems (missing or corrupt files, database mismatches).
     corrupt: usize,
-    /// 上游已变化的段数（正常现象，仅提示）。
+    /// Number of segments changed upstream (normal; informational only).
     changed: usize,
     videos: Vec<VideoCheck>,
 }
@@ -74,7 +74,7 @@ pub async fn run(ctx: &Context, args: &VerifyArgs) -> Result<()> {
 
     let targets = load_targets(&vault, args.id.as_deref()).await?;
     if targets.is_empty() {
-        println!("没有可校验的视频：先运行 `dv add <BV号>` 与 `dv sync`");
+        println!("No videos to verify: run `dv add <BV id>` and `dv sync` first");
         return Ok(());
     }
 
@@ -114,9 +114,11 @@ pub async fn run(ctx: &Context, args: &VerifyArgs) -> Result<()> {
     }
 
     if report.corrupt > 0 {
-        return Err(
-            dv_core::VaultError::Corrupt(format!("{} 个分P 校验未通过", report.corrupt)).into(),
-        );
+        return Err(dv_core::VaultError::Corrupt(format!(
+            "{} parts failed verification",
+            report.corrupt
+        ))
+        .into());
     }
     Ok(())
 }
@@ -135,7 +137,9 @@ async fn load_targets(vault: &Arc<Vault>, id: Option<&str>) -> Result<Vec<VideoM
         .await?;
         return match found {
             Some(meta) => Ok(vec![meta]),
-            None => Err(anyhow::anyhow!("库里没有 {raw}（先运行 `dv add {raw}`）")),
+            None => Err(anyhow::anyhow!(
+                "no {raw} in the database (run `dv add {raw}` first)"
+            )),
         };
     }
 
@@ -165,18 +169,20 @@ async fn check_page(
     let expected = page.nominal_segments();
     let mut problems = Vec::new();
     if stats.danmaku == 0 {
-        problems.push("库里没有任何弹幕".to_string());
+        problems.push("no danmaku in the database".to_string());
     }
 
-    // 「是否完整同步过」比「段数够不够」可靠：空分段不会入库，按条数比会误报。
+    // "Whether a full sync ever succeeded" is more reliable than "are there enough segments": empty segments are never recorded, so a count comparison gives false alarms.
     let worker = vault.clone();
     let cid = page.cid;
     let synced_at = blocking(move || worker.page_synced_at(cid)).await?;
     if synced_at.is_none() {
-        problems.push("该分P 从未完整同步成功（上次抓取中断）".to_string());
+        problems.push(
+            "this part never completed a full sync (the last fetch was interrupted)".to_string(),
+        );
     }
 
-    // 文件一致性：重新渲染再比较，比「文件是否存在」有意义得多。
+    // File consistency: re-rendering and comparing is far more meaningful than just "does the file exist".
     let worker = vault.clone();
     let cid = page.cid;
     let items = blocking(move || worker.load_danmaku(cid, true)).await?;
@@ -189,11 +195,14 @@ async fn check_page(
     let xml = match std::fs::read_to_string(&xml_path) {
         Ok(on_disk) if on_disk == rendered => XmlState::Ok,
         Ok(_) => {
-            problems.push(format!("XML 与库不一致：{}", xml_path.display()));
+            problems.push(format!(
+                "XML does not match the database: {}",
+                xml_path.display()
+            ));
             XmlState::Drift
         }
         Err(_) => {
-            problems.push(format!("XML 缺失：{}", xml_path.display()));
+            problems.push(format!("XML missing: {}", xml_path.display()));
             XmlState::Missing
         }
     };
@@ -208,7 +217,7 @@ async fn check_page(
             };
             match client.segment(&req).await {
                 Ok(segment) => {
-                    // 空分段本来就不入库，跳过比对。
+                    // Empty segments are never recorded anyway, so skip the comparison.
                     if segment.items.is_empty() {
                         continue;
                     }
@@ -218,13 +227,15 @@ async fn check_page(
                     match recorded {
                         Some(state) if state.sha256 == segment.sha256 => {}
                         Some(_) => changed_segments.push(index),
-                        None => problems.push(format!("段 {index} 抓到了但库里没有记录")),
+                        None => problems.push(format!(
+                            "segment {index} was fetched but has no record in the database"
+                        )),
                     }
                 }
                 Err(err) if err.is_permanent_skip() => {
                     changed_segments.push(index);
                 }
-                Err(err) => problems.push(format!("段 {index} 重新抓取失败: {err}")),
+                Err(err) => problems.push(format!("segment {index} refetch failed: {err}")),
             }
         }
     }
@@ -244,14 +255,20 @@ async fn check_page(
 fn print_page(video_id: &str, check: &PageCheck) {
     let mark = if check.is_clean() { "✓" } else { "✗" };
     println!(
-        "{mark} {video_id} p{} · {} 条 · 分段 {}",
-        check.page, check.danmaku, check.segments_recorded
+        "{mark} {video_id} p{} · {} danmaku · {} {}",
+        check.page,
+        check.danmaku,
+        check.segments_recorded,
+        plural(check.segments_recorded as usize, "segment", "segments")
     );
     for problem in &check.problems {
         println!("    - {problem}");
     }
     if !check.changed_segments.is_empty() {
-        println!("    · 上游已变化的分段: {:?}", check.changed_segments);
+        println!(
+            "    · segments changed upstream: {:?}",
+            check.changed_segments
+        );
     }
 }
 
@@ -259,16 +276,23 @@ fn print_summary(report: &VerifyReport, deep: bool) {
     let pages: usize = report.videos.iter().map(|v| v.pages.len()).sum();
     println!();
     if report.corrupt == 0 {
-        println!("校验通过：{pages} 个分P 与库、文件一致");
+        println!(
+            "Verification passed: checked {pages} {}; database and files agree",
+            plural(pages, "part", "parts")
+        );
     } else {
-        println!("发现 {} 个分P 有问题（共 {pages} 个）", report.corrupt);
+        println!(
+            "Found {} problematic {} (of {pages})",
+            report.corrupt,
+            plural(report.corrupt, "part", "parts")
+        );
     }
     if deep {
         if report.changed == 0 {
-            println!("深度校验：所有分段与上次抓取一致");
+            println!("Deep verify: all segments match the last fetch");
         } else {
             println!(
-                "深度校验：{} 个分段在上游已变化（备份可在下次 sync 时更新）",
+                "Deep verify: {} segments changed upstream (the backup can be updated on the next sync)",
                 report.changed
             );
         }

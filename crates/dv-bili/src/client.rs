@@ -1,7 +1,8 @@
-//! B 站 HTTP 客户端。
+//! Bilibili HTTP client.
 //!
-//! 只做三件事：拼 URL、把 HTTP/业务错误映射成 `VaultError`、把响应转成领域模型。
-//! 限速、重试、解压各自独立，便于单独测试。
+//! It does exactly three things: assemble URLs, map HTTP/API errors into `VaultError`, and turn
+//! responses into domain models.
+//! Rate limiting, retries, and decompression are independent, so each can be tested on its own.
 
 use std::time::Duration;
 
@@ -69,13 +70,13 @@ impl BiliClient {
 
         if let Some(proxy) = cfg.proxy.as_deref().filter(|p| !p.is_empty()) {
             let proxy = reqwest::Proxy::all(proxy)
-                .map_err(|e| VaultError::Network(format!("代理配置无效: {e}")))?;
+                .map_err(|e| VaultError::Network(format!("invalid proxy configuration: {e}")))?;
             builder = builder.proxy(proxy);
         }
 
         let http = builder
             .build()
-            .map_err(|e| VaultError::Network(format!("HTTP 客户端初始化失败: {e}")))?;
+            .map_err(|e| VaultError::Network(format!("failed to create the HTTP client: {e}")))?;
 
         Ok(Self {
             http,
@@ -85,9 +86,9 @@ impl BiliClient {
         })
     }
 
-    // -- 基础设施 ---------------------------------------------------------
+    // -- Infrastructure --------------------------------------------------
 
-    /// 单次请求，不重试；限速在这里生效。
+    /// A single request without retries; the rate limit is applied here.
     async fn http_once(&self, url: &str) -> Result<Vec<u8>> {
         self.limiter.acquire().await;
 
@@ -104,7 +105,8 @@ impl BiliClient {
         let status = resp.status();
         let http_code = status.as_u16();
 
-        // 304 / 204：B 站对「不存在的分段」会回 304 而不是空 200，按空内容处理。
+        // 304 / 204: Bilibili replies 304 (not an empty 200) for a segment that does not exist;
+        // treat it as empty content.
         if matches!(http_code, 204 | 304) {
             return Ok(Vec::new());
         }
@@ -115,7 +117,7 @@ impl BiliClient {
             return Err(VaultError::Network(format!("HTTP {http_code}")));
         }
         if !status.is_success() {
-            // 4xx 基本都是「没有权限 / 不存在」，重试没有意义。
+            // 4xx almost always means "no permission / not found", so retrying is pointless.
             return Err(VaultError::Api {
                 code: -(http_code as i32),
                 msg: format!("HTTP {http_code}"),
@@ -126,18 +128,19 @@ impl BiliClient {
         Ok(body.to_vec())
     }
 
-    /// 带重试的取字节。
+    /// Fetch raw bytes with retries.
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>> {
         self.retry.run(|| async { self.http_once(url).await }).await
     }
 
-    /// 取 JSON 的 `data` 字段；`code != 0` 视为业务错误并参与重试判定。
+    /// Fetch the JSON `data` field; `code != 0` counts as an API error and takes part in the retry
+    /// decision.
     async fn fetch_data(&self, url: &str) -> Result<serde_json::Value> {
         self.retry
             .run(|| async {
                 let bytes = self.http_once(url).await?;
                 let value: serde_json::Value = serde_json::from_slice(&bytes)
-                    .map_err(|e| VaultError::Parse(format!("响应不是合法 JSON: {e}")))?;
+                    .map_err(|e| VaultError::Parse(format!("response is not valid JSON: {e}")))?;
                 check_api(&value)?;
                 Ok(value
                     .get("data")
@@ -147,23 +150,23 @@ impl BiliClient {
             .await
     }
 
-    // -- 接口 -------------------------------------------------------------
+    // -- Endpoints -------------------------------------------------------
 
-    /// 视频元信息与全部分 P。
+    /// Video metadata plus every part.
     pub async fn fetch_video(&self, video: &VideoRef) -> Result<VideoMeta> {
         let url = match (video.bvid(), video.aid()) {
             (Some(bvid), _) => format!("{API}/x/web-interface/view?bvid={}", bvid.as_str()),
             (None, Some(aid)) => format!("{API}/x/web-interface/view?aid={}", aid.get()),
-            (None, None) => return Err(VaultError::InvalidId("视频引用为空".into())),
+            (None, None) => return Err(VaultError::InvalidId("video reference is empty".into())),
         };
 
         let data = self.fetch_data(&url).await?;
         let view: ViewData = serde_json::from_value(data)
-            .map_err(|e| VaultError::Parse(format!("view 响应结构不符: {e}")))?;
+            .map_err(|e| VaultError::Parse(format!("unexpected view response shape: {e}")))?;
         view.into_meta()
     }
 
-    /// 一个 6 分钟分段。
+    /// One 6-minute segment.
     pub async fn fetch_segment(&self, req: &SegmentReq) -> Result<Segment> {
         let url = format!(
             "{API}/x/v2/dm/web/seg.so?type=1&oid={}&pid={}&segment_index={}",
@@ -176,7 +179,7 @@ impl BiliClient {
             .retry
             .run(|| async {
                 let body = self.http_once(&url).await?;
-                // 出问题时服务端会返回 JSON 而不是 protobuf
+                // On failure the server returns JSON instead of protobuf
                 if let Some(err) = json_error(&body) {
                     return Err(err);
                 }
@@ -187,7 +190,7 @@ impl BiliClient {
         parse_segment(req.index, &bytes)
     }
 
-    /// 整包 XML（已解压）。
+    /// The full XML package (already decompressed).
     pub async fn fetch_legacy_xml(&self, cid: Cid) -> Result<Vec<u8>> {
         let url = format!("{API}/x/v1/dm/list.so?oid={}", cid.get());
         let bytes = self.fetch_bytes(&url).await?;
@@ -214,7 +217,7 @@ impl DanmakuSource for BiliClient {
 }
 
 // ---------------------------------------------------------------------------
-// 响应 → 领域模型
+// Response → domain model
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -260,7 +263,7 @@ struct PageData {
 impl ViewData {
     fn into_meta(self) -> Result<VideoMeta> {
         if self.aid == 0 {
-            return Err(VaultError::Parse("view 响应缺少 aid".into()));
+            return Err(VaultError::Parse("view response is missing aid".into()));
         }
 
         let mut pages: Vec<PageMeta> = Vec::with_capacity(self.pages.len().max(1));
@@ -282,7 +285,8 @@ impl ViewData {
             });
         }
 
-        // 兜底：极少数响应没有 pages 数组，用顶层 cid 合成一个分 P。
+        // Fallback: a handful of responses have no pages array, so synthesize one part from the
+        // top-level cid.
         if pages.is_empty() && self.cid > 0 {
             pages.push(PageMeta {
                 cid: Cid(self.cid),
@@ -294,7 +298,7 @@ impl ViewData {
         }
 
         if pages.is_empty() {
-            return Err(VaultError::Parse("view 响应里没有任何分 P".into()));
+            return Err(VaultError::Parse("view response contains no parts".into()));
         }
 
         let total_ms = pages
@@ -321,7 +325,7 @@ impl ViewData {
 
 pub fn parse_segment(index: u32, bytes: &[u8]) -> Result<Segment> {
     let reply = DmSegMobileReply::decode(bytes)
-        .map_err(|e| VaultError::Parse(format!("分段 {index} 的 protobuf 解析失败: {e}")))?;
+        .map_err(|e| VaultError::Parse(format!("segment {index}: protobuf parse failed: {e}")))?;
 
     let items: Vec<Danmaku> = reply
         .elems
@@ -337,7 +341,8 @@ pub fn parse_segment(index: u32, bytes: &[u8]) -> Result<Segment> {
     })
 }
 
-/// `dmid` 同时有数值和字符串两种表示，优先用字符串（避免大整数精度问题）。
+/// `dmid` is exposed both as a number and as a string; prefer the string (avoids large-integer
+/// precision loss).
 fn elem_to_danmaku(elem: DanmakuElem) -> Option<Danmaku> {
     let dmid = elem
         .id_str
@@ -368,7 +373,7 @@ fn elem_to_danmaku(elem: DanmakuElem) -> Option<Danmaku> {
 }
 
 // ---------------------------------------------------------------------------
-// 错误映射
+// Error mapping
 // ---------------------------------------------------------------------------
 
 fn net_err(err: reqwest::Error) -> VaultError {
@@ -383,7 +388,7 @@ fn check_api(value: &serde_json::Value) -> Result<()> {
     let msg = value
         .get("message")
         .and_then(|m| m.as_str())
-        .unwrap_or("未知错误")
+        .unwrap_or("unknown error")
         .to_string();
     Err(map_api_code(code, msg))
 }
@@ -396,7 +401,8 @@ fn map_api_code(code: i32, msg: String) -> VaultError {
     }
 }
 
-/// 响应体是 JSON 错误对象时取出错误（protobuf 接口出错会这样返回）。
+/// Extract the error when the response body is a JSON error object (binary endpoints return
+/// that on failure).
 fn json_error(bytes: &[u8]) -> Option<VaultError> {
     let first = bytes.iter().find(|b| !b.is_ascii_whitespace())?;
     if *first != b'{' {
@@ -407,7 +413,7 @@ fn json_error(bytes: &[u8]) -> Option<VaultError> {
     let msg = value
         .get("message")
         .and_then(|m| m.as_str())
-        .unwrap_or("未知错误")
+        .unwrap_or("unknown error")
         .to_string();
     Some(map_api_code(code, msg))
 }
@@ -422,7 +428,7 @@ mod tests {
             "aid": 80433022,
             "bvid": "BV1GJ411x7h7",
             "cid": 137649199,
-            "title": "标题",
+            "title": "Title",
             "pic": "http://i0.hdslb.com/x.jpg",
             "pubdate": 1565103107,
             "duration": 213,
@@ -451,13 +457,13 @@ mod tests {
     #[test]
     fn maps_api_errors() {
         let v: serde_json::Value =
-            serde_json::from_str(r#"{"code":-404,"message":"啥都木有","ttl":1}"#).unwrap();
+            serde_json::from_str(r#"{"code":-404,"message":"nothing found","ttl":1}"#).unwrap();
         let err = check_api(&v).unwrap_err();
         assert!(matches!(err, VaultError::Api { code: -404, .. }));
         assert!(err.is_permanent_skip());
 
         let v: serde_json::Value =
-            serde_json::from_str(r#"{"code":-412,"message":"拦截"}"#).unwrap();
+            serde_json::from_str(r#"{"code":-412,"message":"intercepted"}"#).unwrap();
         assert!(matches!(
             check_api(&v).unwrap_err(),
             VaultError::RateLimited
@@ -467,7 +473,7 @@ mod tests {
     #[test]
     fn detects_json_error_body_for_binary_endpoints() {
         assert!(json_error(b"  {\"code\":-500,\"message\":\"err\"}").is_some());
-        // 真正的 protobuf 以 0x0a 开头，不该被误判
+        // Real protobuf starts with 0x0a, so it must not be misdetected.
         assert!(json_error(&[0x0a, 0x03, 0x08, 0x01]).is_none());
     }
 

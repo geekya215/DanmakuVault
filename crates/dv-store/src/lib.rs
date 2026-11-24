@@ -1,4 +1,4 @@
-//! 本地存储：vault 目录布局、SQLite 索引、原子写入。
+//! Local storage: vault directory layout, SQLite index, atomic writes.
 
 pub mod fsx;
 pub mod migrations;

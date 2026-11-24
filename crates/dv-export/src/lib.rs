@@ -1,19 +1,22 @@
-//! 导出：把库里的弹幕渲染成文件。
+//! Export: render the danmaku stored in a vault into files.
 //!
-//! 两种输出：
+//! Two output formats:
 //!
-//! * **XML** —— 与 B 站官方格式兼容，播放器 / DanmakuFactory 能直接读；
-//! * **JSONL** —— 无损内部格式，字段一一对应，方便二次处理。
+//! * **XML** — compatible with Bilibili's official format, so players and DanmakuFactory can
+//!   read it directly;
+//! * **JSONL** — lossless internal format with one-to-one fields, convenient for further
+//!   processing.
 //!
-//! 两条硬要求：**输出确定性**（同一份数据导两次字节相同，便于 diff 与校验）、
-//! **不丢字段**（`extras` 里的原样保留）。
+//! Two hard requirements: **deterministic output** (exporting the same data twice yields the
+//! same bytes, which makes diffing and verification easy) and **no dropped fields** (whatever
+//! is in `extras` is preserved verbatim).
 
 pub mod jsonl;
 pub mod xml;
 
 use dv_core::Danmaku;
 
-/// 导出前统一排序，保证输出确定性。
+/// Sort everything up front before export so the output stays deterministic.
 pub fn sorted(items: &[Danmaku]) -> Vec<&Danmaku> {
     let mut out: Vec<&Danmaku> = items.iter().collect();
     out.sort();

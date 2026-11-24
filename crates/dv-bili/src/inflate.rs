@@ -1,14 +1,14 @@
-//! 弹幕接口的响应解压。
+//! Decompression for danmaku endpoint responses.
 //!
-//! `list.so` 返回的是 **raw deflate**（没有 zlib 头）；少数情况是 gzip 或明文。
-//! 这里统一嗅探，避免调用方到处写分支。
+//! `list.so` returns **raw deflate** (no zlib header); in rare cases it is gzip or plaintext.
+//! Detection is centralized here so callers do not have to branch at every call site.
 
 use std::io::Read;
 
 use dv_core::{Result, VaultError};
 use flate2::read::{DeflateDecoder, GzDecoder};
 
-/// 猜测并解压。
+/// Detect the format and decompress.
 pub fn inflate_auto(bytes: &[u8]) -> Result<Vec<u8>> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
         return gunzip(bytes);
@@ -25,7 +25,7 @@ pub fn inflate_auto(bytes: &[u8]) -> Result<Vec<u8>> {
     }
 
     Err(VaultError::Parse(
-        "无法识别弹幕响应格式（既不是 deflate/gzip，也不是 XML）".into(),
+        "unrecognized danmaku response format (neither deflate/gzip nor XML)".into(),
     ))
 }
 
@@ -33,7 +33,7 @@ fn gunzip(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     GzDecoder::new(bytes)
         .read_to_end(&mut out)
-        .map_err(|e| VaultError::Parse(format!("gzip 解压失败: {e}")))?;
+        .map_err(|e| VaultError::Parse(format!("gzip decompression failed: {e}")))?;
     Ok(out)
 }
 
@@ -41,7 +41,7 @@ fn inflate_raw(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     DeflateDecoder::new(bytes)
         .read_to_end(&mut out)
-        .map_err(|e| VaultError::Parse(format!("deflate 解压失败: {e}")))?;
+        .map_err(|e| VaultError::Parse(format!("deflate decompression failed: {e}")))?;
     Ok(out)
 }
 

@@ -18,13 +18,13 @@ use dv_store::Vault;
 
 use crate::config;
 
-/// 按 `--json` 输出结构化结果。
+/// Print a structured result when `--json` is given.
 pub fn print_json<T: serde::Serialize>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
-/// unix 秒 → RFC3339。
+/// Unix seconds → RFC3339.
 pub fn ts_unix(ts: i64) -> String {
     time::OffsetDateTime::from_unix_timestamp(ts)
         .ok()
@@ -35,17 +35,17 @@ pub fn ts_unix(ts: i64) -> String {
         .unwrap_or_else(|| ts.to_string())
 }
 
-/// 打开 vault；不存在时给出可操作的提示。
+/// Open the vault; when it is missing, point the user at an actionable fix.
 pub fn open_vault(ctx: &config::Context) -> Result<Arc<Vault>> {
     Ok(Arc::new(Vault::open(&ctx.vault_root).map_err(|err| {
         anyhow::anyhow!(
-            "{err}（提示：先运行 `dv init --root {}`）",
+            "{err} (hint: run `dv init --root {}` first)",
             ctx.vault_root.display()
         )
     })?))
 }
 
-/// 构造 B 站客户端。cookie 只从环境变量 / 配置文件读，绝不落到日志里。
+/// Build the Bilibili client. The cookie is read only from the environment / config file and never lands in logs.
 pub fn build_client(cfg: &config::Config) -> Result<BiliClient> {
     let client = BiliClient::new(BiliConfig {
         qps: cfg.net.qps,
@@ -65,7 +65,7 @@ fn cookie_from_env() -> Option<String> {
         .filter(|c| !c.trim().is_empty())
 }
 
-/// 把同步的 SQLite 调用挪到阻塞线程池，别占住 tokio 的 worker。
+/// Move synchronous SQLite calls onto the blocking thread pool instead of tying up tokio workers.
 pub async fn blocking<T, F>(f: F) -> Result<T>
 where
     F: FnOnce() -> std::result::Result<T, VaultError> + Send + 'static,
@@ -73,11 +73,20 @@ where
 {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|err| anyhow::anyhow!("后台任务异常: {err}"))?
+        .map_err(|err| anyhow::anyhow!("background task failed: {err}"))?
         .map_err(Into::into)
 }
 
-/// 写 `videos/<id>/meta.json`：脱离数据库也能读懂这份备份。
+/// Singular or plural form for `n`.
+pub fn plural<'a>(n: usize, singular: &'a str, plural: &'a str) -> &'a str {
+    if n == 1 {
+        singular
+    } else {
+        plural
+    }
+}
+
+/// Write `videos/<id>/meta.json`: this backup stays readable without the database.
 pub async fn write_video_meta(vault: &Arc<Vault>, meta: &VideoMeta) -> Result<()> {
     let worker = vault.clone();
     let folder = meta.folder_name();
@@ -90,9 +99,9 @@ pub async fn write_video_meta(vault: &Arc<Vault>, meta: &VideoMeta) -> Result<()
     .await
 }
 
-/// 把某个分 P 的弹幕落成文件（XML 始终写，JSONL 按配置）。
+/// Materialize the danmaku of one part as files (XML is always written, JSONL per config).
 ///
-/// 同步完成和 `gc` 之后都要调它，保证磁盘文件始终是库的忠实投影。
+/// Called both after a sync completes and after `gc`, so the files on disk always stay a faithful projection of the database.
 pub fn write_page_artifacts(
     vault: &Vault,
     cid: Cid,

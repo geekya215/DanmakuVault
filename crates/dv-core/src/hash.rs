@@ -1,4 +1,4 @@
-//! 哈希工具：分段校验与内容寻址。
+//! Hashing utilities: segment verification and content addressing.
 
 use sha2::{Digest, Sha256};
 

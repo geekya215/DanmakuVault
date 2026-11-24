@@ -37,8 +37,8 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# 本机 MSVC 14.44 编 C 源码时带 /Z7 会失败（D8050: cannot execute c1.dll）。
-# 依赖里的 C 代码（sqlite3、ring）不需要调试信息，只对依赖关掉。
+# MSVC 14.44 fails with D8050 ("cannot execute c1.dll") when compiling C sources with /Z7.
+# C code in dependencies (sqlite3, ring) needs no debug info, so disable it for dependencies only.
 [profile.dev.package."*"]
 debug = false
 

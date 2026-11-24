@@ -1,7 +1,7 @@
-//! 存储端口（port）。
+//! Storage port.
 //!
-//! 同步实现：SQLite 的写入在 `dv-store` 里由一把锁串行化，
-//! 异步侧需要批量写时用 `spawn_blocking` 包一层。
+//! Synchronous implementation: in `dv-store` the SQLite writes are serialized by a single lock,
+//! and the async side wraps batch writes in `spawn_blocking`.
 
 use crate::error::Result;
 use crate::id::{Aid, Bvid, Cid};
@@ -24,7 +24,7 @@ impl UpsertStats {
     }
 }
 
-/// `list` 命令用的一行摘要。
+/// One-row summary used by the `list` command.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct VideoSummary {
     pub aid: Aid,
@@ -36,7 +36,7 @@ pub struct VideoSummary {
     pub last_synced_at: Option<i64>,
 }
 
-/// `show` 用的单个分 P 统计。
+/// Per-part statistics used by `show`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PageStats {
     pub danmaku: u64,
@@ -44,9 +44,10 @@ pub struct PageStats {
     pub segments: u32,
 }
 
-/// `gc` 的结果：删了多少行、影响了哪些分 P。
+/// Result of `gc`: how many rows were deleted and which parts were affected.
 ///
-/// 受影响的分 P 必须重新落文件，否则 `verify` 会立刻报「文件与库不一致」。
+/// Every affected part has to be written back to disk, otherwise `verify` immediately reports
+/// "file does not match database".
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PurgeOutcome {
     pub deleted: u64,
@@ -54,38 +55,43 @@ pub struct PurgeOutcome {
 }
 
 pub trait Repository {
-    /// 写入/更新稿件与分 P 元信息。
+    /// Insert/update video and part metadata.
     fn upsert_video(&self, meta: &VideoMeta) -> Result<()>;
 
-    /// 批量写入弹幕，`(cid, dmid)` 冲突时只刷新 `last_seen_at` 与墓碑。
+    /// Batch-insert danmaku; on a `(cid, dmid)` conflict only `last_seen_at` and the tombstone are
+    /// refreshed.
     fn upsert_danmaku(&self, cid: Cid, items: &[Danmaku], seen_at: i64) -> Result<UpsertStats>;
 
     fn segment_state(&self, cid: Cid, index: u32) -> Result<Option<SegmentState>>;
 
     fn put_segment_state(&self, cid: Cid, state: &SegmentState) -> Result<()>;
 
-    /// 把本轮全量同步中没再出现的弹幕标为墓碑，返回受影响行数。
+    /// Mark as tombstone every danmaku that no longer appeared in this full sync, returning the
+    /// number of affected rows.
     fn mark_missing(&self, cid: Cid, before: i64) -> Result<u64>;
 
-    /// 墓碑时间早于 `before` 的条数（`gc` 的预演）。
+    /// Number of rows whose tombstone time is earlier than `before` (the dry run for `gc`).
     fn count_missing_before(&self, before: i64) -> Result<u64>;
 
-    /// 物理删除墓碑时间早于 `before` 的弹幕。
+    /// Physically delete danmaku whose tombstone time is earlier than `before`.
     fn purge_missing_before(&self, before: i64) -> Result<PurgeOutcome>;
 
-    /// 分 P 在磁盘上的位置：`(目录名, 分P 序号)`。
+    /// On-disk location of a part: `(folder name, part number)`.
     fn page_location(&self, cid: Cid) -> Result<Option<(String, u32)>>;
 
-    /// 读取某分 P 的弹幕，按时间排序。
+    /// Load the danmaku of one part, sorted by time.
     ///
-    /// `include_missing = false` 时排除墓碑（服务端已消失的弹幕）。
+    /// With `include_missing = false` the tombstones (danmaku that have disappeared from the
+    /// server) are excluded.
     fn load_danmaku(&self, cid: Cid, include_missing: bool) -> Result<Vec<Danmaku>>;
 
     fn set_page_synced(&self, cid: Cid, at: i64) -> Result<()>;
 
-    /// 该分 P 上次「完整同步成功」的时间；从未完整同步过返回 `None`。
+    /// When this part was last "fully synced successfully"; `None` if it has never been fully
+    /// synced.
     ///
-    /// 用它区分两种模式：`None` 走断点续传（跳过已有段），`Some` 走刷新（全量重抓 + 比对）。
+    /// This is what distinguishes the two modes: `None` goes through resume (skipping segments
+    /// already present), `Some` goes through refresh (refetch everything and compare).
     fn page_synced_at(&self, cid: Cid) -> Result<Option<i64>>;
 
     fn page_stats(&self, cid: Cid) -> Result<PageStats>;

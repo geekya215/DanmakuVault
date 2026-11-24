@@ -1,6 +1,6 @@
-//! `dv gc` —— 清理长期处于「已消失」状态的弹幕。
+//! `dv gc` — purge danmaku that have long been marked "missing".
 //!
-//! 删除是不可逆的，所以默认只预演：必须显式 `--yes` 才会真删。
+//! Deletion is irreversible, so the default is a dry run: nothing is actually deleted unless `--yes` is given explicitly.
 
 use anyhow::Result;
 use dv_core::{now_unix, Repository};
@@ -26,7 +26,7 @@ pub async fn run(ctx: &Context, args: &GcArgs) -> Result<()> {
     let worker = vault.clone();
     let candidates = blocking(move || worker.count_missing_before(cutoff)).await?;
 
-    // 没见过墓碑就别动数据库，也别让用户以为发生了什么。
+    // If no tombstones were found, leave the database alone and do not let the user think something happened.
     if candidates == 0 {
         if ctx.json {
             return print_json(&GcReport {
@@ -38,7 +38,7 @@ pub async fn run(ctx: &Context, args: &GcArgs) -> Result<()> {
             });
         }
         println!(
-            "没有需要清理的弹幕（标记消失超过 {} 天的为 0 条）",
+            "No danmaku to purge (0 marked missing for more than {} days)",
             args.older_than_days
         );
         return Ok(());
@@ -53,7 +53,7 @@ pub async fn run(ctx: &Context, args: &GcArgs) -> Result<()> {
         (0, Vec::new())
     };
 
-    // 删了行就得重画文件，否则 verify 会立刻报「文件与库不一致」。
+    // Deleting rows means the files must be re-rendered, otherwise verify immediately reports "files do not match the database".
     if !affected.is_empty() {
         let worker = vault.clone();
         let write_jsonl = ctx.config.export.write_jsonl;
@@ -83,15 +83,15 @@ pub async fn run(ctx: &Context, args: &GcArgs) -> Result<()> {
 
     if confirmed {
         println!(
-            "已删除 {deleted} 条标记消失超过 {} 天的弹幕",
+            "Deleted {deleted} danmaku marked missing for more than {} days",
             args.older_than_days
         );
     } else {
         println!(
-            "将删除 {candidates} 条标记消失超过 {} 天的弹幕",
+            "Would delete {candidates} danmaku marked missing for more than {} days",
             args.older_than_days
         );
-        println!("这是预演，数据没有改动。确认执行请加 --yes");
+        println!("This is a dry run; no data was changed. Add --yes to confirm");
     }
     Ok(())
 }

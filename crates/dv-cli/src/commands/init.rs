@@ -1,4 +1,4 @@
-//! `dv init` —— 建目录、建库、写默认配置。幂等。
+//! `dv init` — create the directory, the database and the default config. Idempotent.
 
 use anyhow::Result;
 use dv_store::Vault;
@@ -25,7 +25,7 @@ struct InitReport {
 pub fn run(ctx: &config::Context, args: &InitArgs) -> Result<()> {
     let root = args.root.clone().unwrap_or_else(|| ctx.vault_root.clone());
 
-    // 目录/文件已存在只影响提示，不影响结果：init 必须可重复执行。
+    // An existing directory/file only changes the message, never the outcome: init must be repeatable.
     let created = !root.join("index.sqlite").exists();
 
     let vault = Vault::create(&root)?;
@@ -33,12 +33,12 @@ pub fn run(ctx: &config::Context, args: &InitArgs) -> Result<()> {
     let schema_version = vault.schema_version()?;
     let marker = vault.read_marker();
 
-    // 配置写不进去不该让整个 init 失败：库本身已经可用，默认值也能跑。
+    // A config that cannot be written must not fail the whole init: the database is already usable and the defaults work too.
     let config_written = match config::write_default_config(&ctx.config_path, &root, args.force) {
         Ok(written) => written,
         Err(err) => {
             eprintln!(
-                "警告: 配置未写入（{}），本次使用内置默认值",
+                "warning: config not written ({}); using the built-in defaults for this run",
                 err.root_cause()
             );
             false
@@ -62,30 +62,30 @@ pub fn run(ctx: &config::Context, args: &InitArgs) -> Result<()> {
 
     println!("vault    {}", root.display());
     println!(
-        "状态     {}",
+        "status   {}",
         if created {
-            "新建"
+            "new"
         } else {
-            "已存在（未改动数据）"
+            "exists (data untouched)"
         }
     );
     println!("schema   v{schema_version}");
     println!(
-        "已有     视频 {} · 分P {} · 弹幕 {} · 分段 {}",
+        "data     videos {} · parts {} · danmaku {} · segments {}",
         stats.videos, stats.pages, stats.danmaku, stats.segments
     );
     println!(
-        "配置     {} {}",
+        "config   {} {}",
         ctx.config_path.display(),
         if config_written {
-            "（已写入）"
+            "(written)"
         } else {
-            "（已存在，未改动）"
+            "(exists, unchanged)"
         }
     );
     if let Some(m) = marker {
-        println!("创建于   {}", ts_unix(m.created_at));
+        println!("created  {}", ts_unix(m.created_at));
     }
-    println!("\n下一步：dv add <BV号> && dv sync");
+    println!("\nnext: dv add <ID> && dv sync");
     Ok(())
 }

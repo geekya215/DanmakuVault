@@ -1,4 +1,4 @@
-//! B 站接口客户端：视频元信息、弹幕分段、旧版 XML。
+//! Bilibili API client: video metadata, danmaku segments, and legacy XML.
 
 pub mod client;
 pub mod inflate;

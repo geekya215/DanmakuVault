@@ -2,7 +2,7 @@ name: Audit
 
 on:
   schedule:
-    # 每周一 02:00 UTC 跑一次，不阻塞日常 PR
+    # Weekly on Monday 02:00 UTC; never gates pull requests
     - cron: '0 2 * * 1'
   workflow_dispatch:
 

@@ -1,11 +1,11 @@
-//! 领域模型。
+//! Domain models.
 
 use std::fmt;
 
 use crate::id::{Aid, Bvid, Cid, Dmid};
 
 // ---------------------------------------------------------------------------
-// 视频 / 分 P
+// Video / parts
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -17,16 +17,16 @@ pub struct Owner {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PageMeta {
     pub cid: Cid,
-    /// 1-based 分 P 序号。
+    /// 1-based part number.
     pub page: u32,
     pub part: String,
     pub duration_ms: u64,
-    /// 服务端声明的弹幕总数（来自 `dm/web/view`），可能缺失。
+    /// Total danmaku count declared by the server (from `dm/web/view`); may be absent.
     pub declared_count: Option<u32>,
 }
 
 impl PageMeta {
-    /// 6 分钟一段，向下取整至少 1 段。
+    /// One segment per six minutes, rounded up, never less than one.
     pub fn nominal_segments(&self) -> u32 {
         let seg = self.duration_ms.div_ceil(360_000).max(1);
         u32::try_from(seg).unwrap_or(u32::MAX)
@@ -50,7 +50,7 @@ impl VideoMeta {
         self.pages.iter().find(|p| p.cid == cid)
     }
 
-    /// 目录名：优先 BV 号，退化成 `av{aid}`。
+    /// Folder name: prefer the BV id, fall back to `av{aid}`.
     pub fn folder_name(&self) -> String {
         match &self.bvid {
             Some(b) => b.to_string(),
@@ -60,41 +60,42 @@ impl VideoMeta {
 }
 
 // ---------------------------------------------------------------------------
-// 弹幕
+// Danmaku
 // ---------------------------------------------------------------------------
 
-/// 一条弹幕。
+/// A single danmaku.
 ///
-/// `progress_ms` 用整数毫秒而不是秒的浮点：排序稳定、比较无误差、往返导出可控。
+/// `progress_ms` is an integer number of milliseconds rather than a float number of seconds:
+/// sorting is stable, comparisons are exact, and round-trip export stays controllable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Danmaku {
     pub dmid: Dmid,
-    /// 相对视频起点的毫秒偏移。
+    /// Millisecond offset from the start of the video.
     pub progress_ms: i64,
-    /// 1/2/3 滚动，4 底部，5 顶部，6 逆向，7 高级，8 代码，9 BAS。
+    /// 1/2/3 scrolling, 4 bottom, 5 top, 6 reverse, 7 advanced, 8 code, 9 BAS.
     pub mode: u8,
     pub fontsize: u8,
     pub color: u32,
-    /// 发送者 UID 的哈希（不是明文 UID）。
+    /// Hash of the sender's UID (not the plaintext UID).
     pub mid_hash: String,
     pub content: String,
-    /// 发送时间，unix 秒。
+    /// Send time, unix seconds.
     pub ctime: i64,
     pub weight: u32,
-    /// 0/1 普通池，2 字幕池。
+    /// 0/1 normal pool, 2 subtitle pool.
     pub pool: u8,
     pub attr: u32,
-    /// 原始 `p` 属性里第 9 个及之后的字段，保证再导出不丢信息。
+    /// The 9th and later fields of the original `p` attribute, so that re-exporting loses nothing.
     pub extras: Option<String>,
 }
 
 impl Danmaku {
-    /// 导出时的稳定排序键。
+    /// Stable sort key for export.
     pub fn sort_key(&self) -> (i64, u64) {
         (self.progress_ms, self.dmid.get())
     }
 
-    /// 秒的表示，保留 5 位小数（与 B 站 XML 一致）。
+    /// Seconds representation with 5 decimal places (matching the Bilibili XML).
     pub fn progress_secs(&self) -> String {
         format!("{:.5}", self.progress_ms as f64 / 1000.0)
     }
@@ -113,18 +114,18 @@ impl Ord for Danmaku {
 }
 
 // ---------------------------------------------------------------------------
-// 分段
+// Segments
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SegmentReq {
     pub cid: Cid,
     pub aid: Aid,
-    /// 1-based 分段号，一段 6 分钟。
+    /// 1-based segment number; one segment covers 6 minutes.
     pub index: u32,
 }
 
-/// 一次分段抓取的结果：原始字节（用于校验/缓存）+ 解析后的条目。
+/// Result of fetching one segment: the raw bytes (for verify/cache) plus the parsed items.
 #[derive(Clone, Debug)]
 pub struct Segment {
     pub index: u32,
@@ -141,9 +142,9 @@ impl Segment {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SegmentSource {
-    /// `x/v2/dm/web/seg.so`（protobuf）
+    /// `x/v2/dm/web/seg.so` (protobuf)
     Protobuf,
-    /// `x/v1/dm/list.so`（deflate + xml）
+    /// `x/v1/dm/list.so` (deflate + xml)
     LegacyXml,
 }
 
@@ -170,7 +171,7 @@ impl fmt::Display for SegmentSource {
     }
 }
 
-/// 分段在库里的状态，断点续传的依据。
+/// The state of a segment in the database; this is what resume is based on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentState {
     pub index: u32,

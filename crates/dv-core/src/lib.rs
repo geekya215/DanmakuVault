@@ -1,6 +1,6 @@
-//! DanmakuVault 领域层：模型、ID、端口 trait、错误。
+//! DanmakuVault domain layer: models, IDs, port traits, errors.
 //!
-//! 这里不做任何 IO，也不认识 HTTP 与 SQLite —— 便于单测与替换实现。
+//! Nothing here does any IO, and nothing here knows about HTTP or SQLite — that keeps unit testing easy and lets implementations be swapped out.
 
 pub mod error;
 pub mod hash;
@@ -20,7 +20,7 @@ pub use source::DanmakuSource;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 当前 unix 时间戳（秒）。
+/// Current unix timestamp (seconds).
 pub fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -28,7 +28,7 @@ pub fn now_unix() -> i64 {
         .unwrap_or_default()
 }
 
-/// 当前 unix 时间戳（毫秒）。
+/// Current unix timestamp (milliseconds).
 pub fn now_unix_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

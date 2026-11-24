@@ -1,38 +1,40 @@
-//! 统一错误类型。
+//! Unified error type.
 //!
-//! 刻意不依赖 `reqwest` / `rusqlite`：底层实现把各自的错误转成这里的变体，
-//! 这样 `dv-core` 保持零 IO 依赖，测试替身也不用引入 HTTP 栈。
+//! It deliberately does not depend on `reqwest` / `rusqlite`: the lower layers convert their own
+//! errors into the variants here, so `dv-core` keeps zero IO dependencies and test doubles do not
+//! have to pull in an HTTP stack.
 
 use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
-    #[error("网络错误: {0}")]
+    #[error("network error: {0}")]
     Network(String),
 
-    /// B 站业务错误（`code != 0`）。`retryable` 由调用方按错误码判定。
-    #[error("接口错误 {code}: {msg}")]
+    /// Bilibili business error (`code != 0`). Whether it is `retryable` is decided by the caller
+    /// from the error code.
+    #[error("API error {code}: {msg}")]
     Api { code: i32, msg: String },
 
-    #[error("解析失败: {0}")]
+    #[error("parse error: {0}")]
     Parse(String),
 
-    #[error("IO 错误: {0}")]
+    #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("数据库错误: {0}")]
+    #[error("database error: {0}")]
     Db(String),
 
-    #[error("需要登录：cookie 缺失或已失效")]
+    #[error("login required: cookie missing or expired")]
     Auth,
 
-    #[error("被限流或风控拦截（-412）")]
+    #[error("rate limited or blocked by anti-bot (-412)")]
     RateLimited,
 
-    #[error("非法 ID: {0}")]
+    #[error("invalid ID: {0}")]
     InvalidId(String),
 
-    #[error("数据损坏: {0}")]
+    #[error("corrupt data: {0}")]
     Corrupt(String),
 
     #[error("{0}")]
@@ -40,7 +42,7 @@ pub enum VaultError {
 }
 
 impl VaultError {
-    /// 是否值得重试：网络抖动、5xx、限流类。
+    /// Whether it is worth retrying: network blips, 5xx, rate limiting.
     pub fn is_retryable(&self) -> bool {
         match self {
             VaultError::Network(_) | VaultError::RateLimited => true,
@@ -49,7 +51,7 @@ impl VaultError {
         }
     }
 
-    /// 是否属于「这个视频/分 P 没救了，跳过别再试」。
+    /// Whether this falls into "this video/part is beyond saving, skip it and stop retrying".
     pub fn is_permanent_skip(&self) -> bool {
         match self {
             VaultError::Api { code, .. } => matches!(code, -404 | 62002 | 62004 | 62012),

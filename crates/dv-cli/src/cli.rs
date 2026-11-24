@@ -1,4 +1,4 @@
-//! 命令行参数定义。契约见 `docs/design.md` §9。
+//! Command-line argument definitions. The contract lives in `docs/design.md` §9.
 
 use std::path::PathBuf;
 
@@ -8,24 +8,24 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "dv",
     version,
-    about = "DanmakuVault — B 站弹幕备份工具",
-    long_about = "把 B 站视频弹幕完整、可校验地备份到本地，并导出为播放器可用的格式。",
+    about = "DanmakuVault — Bilibili danmaku backup tool",
+    long_about = "Back up Bilibili video danmaku to a local vault completely and verifiably, and export it in formats players can use.",
     arg_required_else_help = true
 )]
 pub struct Cli {
-    /// 覆盖 vault 根目录
+    /// Override the vault root directory
     #[arg(long, global = true, env = "DV_VAULT", value_name = "DIR")]
     pub vault: Option<PathBuf>,
 
-    /// 覆盖配置文件路径
+    /// Override the config file path
     #[arg(long, global = true, env = "DV_CONFIG", value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// 机器可读输出（stdout 只留结果，日志走 stderr）
+    /// Machine-readable output (only results on stdout, logs on stderr)
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// 详细日志：-v 信息，-vv 调试，-vvv 追踪
+    /// Verbose logging: -v info, -vv debug, -vvv trace
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
@@ -35,122 +35,122 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// 初始化 vault：建目录、建库、写默认配置
+    /// initialize the vault: create directories, the database, and the default config
     Init(InitArgs),
 
-    /// 登记视频：解析元信息与分 P 并落库（不抓弹幕）
+    /// register a video: resolve metadata and parts, then store them (does not fetch danmaku)
     Add(AddArgs),
 
-    /// 抓取弹幕；省略 ID 时同步库里全部已登记视频
+    /// fetch danmaku; syncs all registered videos when no ID is given
     Sync(SyncArgs),
 
-    /// 列出已备份的视频
+    /// list backed-up videos
     List,
 
-    /// 查看单个视频的同步状态
+    /// show the sync status of a single video
     Show(ShowArgs),
 
-    /// 导出弹幕（XML / JSONL）
+    /// export danmaku (XML / JSONL)
     Export(ExportArgs),
 
-    /// 校验备份完整性与文件一致性
+    /// verify backup integrity and file consistency
     Verify(VerifyArgs),
 
-    /// 清理长期处于「已消失」状态的弹幕
+    /// purge danmaku that have been missing for a long time
     Gc(GcArgs),
 
-    /// 从 videos/ 下的文件重建索引
+    /// rebuild the index from the files under videos/
     Reindex,
 
-    /// 环境自检：库、目录、配置、cookie
+    /// run an environment self-check: database, directories, config, cookie
     Doctor,
 }
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
-    /// vault 根目录（默认取配置，其次平台数据目录）
+    /// vault root directory (defaults to the config value, then the platform data directory)
     #[arg(long, value_name = "DIR")]
     pub root: Option<PathBuf>,
 
-    /// 覆盖已存在的配置文件
+    /// Overwrite an existing config file
     #[arg(long)]
     pub force: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct AddArgs {
-    /// BV 号 / av 号 / 视频页 URL，可给多个
+    /// One or more BV IDs, av IDs, or video page URLs
     #[arg(required = true, value_name = "ID")]
     pub ids: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct SyncArgs {
-    /// 只同步这些视频（BV 号 / av 号 / URL）
+    /// Sync only these videos (BV ID / av ID / URL)
     #[arg(value_name = "ID")]
     pub ids: Vec<String>,
 
-    /// 忽略新鲜度检查，强制重新抓取全部分段
+    /// Ignore the freshness check and re-fetch every segment
     #[arg(long)]
     pub force: bool,
 
-    /// 只打印计划，不发请求
+    /// Print the plan only and send no requests
     #[arg(long)]
     pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
-    /// BV 号 / av 号 / URL
+    /// BV ID / av ID / URL
     #[arg(value_name = "ID")]
     pub id: String,
 }
 
 #[derive(Args, Debug)]
 pub struct ExportArgs {
-    /// BV 号 / av 号 / URL
+    /// BV ID / av ID / URL
     #[arg(value_name = "ID")]
     pub id: String,
 
-    /// 只导出指定分P；`all` 表示全部
+    /// Export only this part; `all` exports every part
     #[arg(long, default_value = "all", value_name = "N|all")]
     pub page: String,
 
-    /// 输出格式
+    /// Output format
     #[arg(long, default_value = "xml", value_parser = ["xml", "jsonl"])]
     pub format: String,
 
-    /// 输出目录（默认写回 vault 内的 videos/）
+    /// Output directory (defaults to videos/ inside the vault)
     #[arg(long, value_name = "DIR")]
     pub out: Option<PathBuf>,
 
-    /// 排除已标记为消失（服务端已删除）的弹幕
+    /// Exclude danmaku marked as missing (already deleted server-side)
     #[arg(long)]
     pub exclude_missing: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct VerifyArgs {
-    /// 只校验这个视频（BV 号 / av 号 / URL）
+    /// Verify only this video (BV ID / av ID / URL)
     #[arg(value_name = "ID")]
     pub id: Option<String>,
 
-    /// 逐段重新拉取并比对 sha256（需要联网）
+    /// Re-fetch every segment and compare sha256 (requires network access)
     #[arg(long)]
     pub deep: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct GcArgs {
-    /// 只删除标记为消失超过 N 天的弹幕
+    /// Only delete danmaku marked missing for more than N days
     #[arg(long, default_value_t = 30, value_name = "DAYS")]
     pub older_than_days: u32,
 
-    /// 只统计，不删除
+    /// Report only, delete nothing
     #[arg(long)]
     pub dry_run: bool,
 
-    /// 确认执行删除（不可逆）
+    /// Confirm the deletion (irreversible)
     #[arg(long)]
     pub yes: bool,
 }

@@ -1,8 +1,8 @@
-//! `dv reindex` —— 数据库丢失/损坏时，从磁盘文件重建索引。
+//! `dv reindex` — rebuild the index from files on disk when the database is lost or corrupt.
 //!
-//! 能恢复：视频元信息（`meta.json`）、弹幕（`danmaku.jsonl`）。
-//! 恢复不了：分段 sha256 与「完整同步过」的标记，所以重建后第一次 `dv sync`
-//! 会走断点续传、把所有分段重新抓一遍（这也正是我们要的核对）。
+//! Recoverable: video metadata (`meta.json`) and danmaku (`danmaku.jsonl`).
+//! Not recoverable: segment sha256 values and the "fully synced" flag, so the first `dv sync` after a rebuild
+//! takes the resume path and refetches every segment (which is exactly the cross-check we want).
 
 use anyhow::{Context as _, Result};
 use dv_core::{Repository, VideoMeta};
@@ -24,14 +24,14 @@ pub async fn run(ctx: &Context) -> Result<()> {
     let videos_dir = vault.paths().videos_dir();
 
     if !videos_dir.is_dir() {
-        println!("videos 目录不存在：{}", videos_dir.display());
+        println!("videos directory does not exist: {}", videos_dir.display());
         return Ok(());
     }
 
     let mut report = ReindexReport::default();
 
     for entry in std::fs::read_dir(&videos_dir)
-        .with_context(|| format!("读取失败: {}", videos_dir.display()))?
+        .with_context(|| format!("read failed: {}", videos_dir.display()))?
     {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
@@ -46,7 +46,10 @@ pub async fn run(ctx: &Context) -> Result<()> {
         {
             Some(meta) => meta,
             None => {
-                eprintln!("跳过 {}：缺 meta.json 或格式不对", video_dir.display());
+                eprintln!(
+                    "Skipping {}: meta.json is missing or malformed",
+                    video_dir.display()
+                );
                 report.videos_skipped += 1;
                 continue;
             }
@@ -65,7 +68,7 @@ pub async fn run(ctx: &Context) -> Result<()> {
                 continue;
             };
             let items = dv_export::jsonl::parse(&text)
-                .with_context(|| format!("解析失败: {}", jsonl_path.display()))?;
+                .with_context(|| format!("parse failed: {}", jsonl_path.display()))?;
             if items.is_empty() {
                 continue;
             }
@@ -85,9 +88,9 @@ pub async fn run(ctx: &Context) -> Result<()> {
         return print_json(&report);
     }
     println!(
-        "重建完成：{} 个视频 · {} 个分P · {} 条弹幕（跳过 {}）",
+        "Rebuild complete: videos {} · parts {} · danmaku {} (skipped {})",
         report.videos, report.pages, report.danmaku, report.videos_skipped
     );
-    println!("建议接着跑一次 `dv verify` 与 `dv sync`：分段状态无法从文件恢复");
+    println!("Consider running `dv verify` and `dv sync` next: segment state cannot be recovered from files");
     Ok(())
 }
