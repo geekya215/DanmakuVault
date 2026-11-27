@@ -13,16 +13,6 @@ dv init && dv add BV1GJ411x7h7 && dv sync
 - **Non-destructive** — comments removed upstream are tombstoned, never dropped.
 - **Verifiable** — `dv verify` cross-checks the database, the files, and upstream.
 
-## Install
-
-Requires Rust 1.88+.
-
-```bash
-cargo install --path crates/dv-cli   # or: cargo build --release
-```
-
-Prebuilt binaries are not published yet; a `v*` tag makes CI build them for Linux, Windows and macOS.
-
 ## Usage
 
 ```bash
@@ -66,8 +56,6 @@ The database indexes, the files are the product: `dv export` regenerates files, 
 
 ## Configuration
 
-`dv init` writes `%APPDATA%\danmaku-vault\config.toml` on Windows; override with `--config` or `DV_CONFIG`.
-
 ```toml
 [net]
 qps = 2.0                       # requests per second
@@ -107,8 +95,6 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
-
-MSRV is 1.88, enforced by a CI job. CI runs the commands above on Ubuntu, Windows and macOS plus an `init`/`doctor` smoke test; a `v*` tag publishes binaries. Building needs a C toolchain (`rusqlite` bundles SQLite).
 
 ## License
 
